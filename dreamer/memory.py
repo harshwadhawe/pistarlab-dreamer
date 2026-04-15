@@ -15,7 +15,7 @@ class ExperienceReplay:
         self.symbolic_env = symbolic_env
         self.size = size
         self.observations = np.empty(
-            (size, observation_size) if symbolic_env else (size, 1, 40, 40),
+            (size, observation_size) if symbolic_env else (size, *observation_size),
             dtype=np.float32,
         )
         self.actions = np.empty((size, action_size), dtype=np.float32)

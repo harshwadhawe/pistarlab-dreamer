@@ -85,7 +85,8 @@ parser.add_argument('--throttle_max', type=float, default=0.5)
 parser.add_argument('--angle_min', type=float, default=-1)
 parser.add_argument('--angle_max', type=float, default=1)
 parser.add_argument('--action_size', default=2)
-parser.add_argument('--observation_size', default=(1, 40, 40))
+parser.add_argument('--channels', type=int, default=1, help='Image channels: 1=grayscale (phase B), 3=RGB (phase A)')
+parser.add_argument('--observation_size', default=None)  # set automatically from --channels below
 
 # Simulator / connection
 parser.add_argument('--sim_path', type=str, default='self')
@@ -95,7 +96,7 @@ parser.add_argument('--use_visual_reward', action='store_true', default=False,
                     help='Replace CTE telemetry reward with image-based visual CTE proxy'
                          ' (use when sim telemetry is unavailable or for real-world transfer)')
 parser.add_argument('--human_override', action='store_true', default=False,
-                    help='Open pygame window: operator presses SPACE to stop (off-track) '
+                    help='Human override: operator presses = to stop (off-track) '
                          'or R to reset (clean lap). Removes all dependence on CTE telemetry.')
 parser.add_argument('--smooth_weight', type=float, default=0.05,
                     help='Penalty weight for steering jerk: reward -= smooth_weight * |steer_t - steer_{t-1}|. '
@@ -113,6 +114,7 @@ parser.add_argument('--render', action='store_true')
 parser.add_argument('--disable-cuda', action='store_true')
 
 args = parser.parse_args()
+args.observation_size = (args.channels, 64, 64)  # derive from --channels
 
 wandb.init(project='donkey_sac')
 wandb.config.update(args)
@@ -168,14 +170,15 @@ if args.human_override:
     from dreamer.envs.human_override import HumanOverride
     human_override = HumanOverride()
     print('Human override active — pygame window open.')
-    print('  SPACE / S : stop (off-track penalty)')
-    print('  R         : reset (clean lap)')
-    print('  Q / ESC   : quit training')
+    print('  =         : stop (off-track penalty)')
+    print('  ↑ Up      : reset (clean lap)')
+    print('  ↓ Down    : quit training')
 
 env = Env(args.env, args.symbolic, args.seed, args.max_episode_length,
           args.action_repeat, args.bit_depth, sim_path=args.sim_path,
           host=args.host, port=args.port, use_visual_reward=args.use_visual_reward,
-          human_override=human_override, smooth_weight=args.smooth_weight)
+          human_override=human_override, smooth_weight=args.smooth_weight,
+          channels=args.channels)
 agent = Dreamer(args)
 
 # ---------------------------------------------------------------------------
