@@ -44,6 +44,8 @@ __MACOSX/
 .ipynb_checkpoints/
 *.ipynb
 
+results/*
+
 # IDE
 .idea/
 .vscode/

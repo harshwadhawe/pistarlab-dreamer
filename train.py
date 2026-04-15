@@ -1,5 +1,8 @@
 import argparse
+import csv
 import os
+import random
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -21,10 +24,10 @@ from dreamer.utils import lineplot, write_video
 parser = argparse.ArgumentParser(description='Dreamer')
 
 # Environment
-parser.add_argument('--env', type=str, default='donkey-generated-roads-v0',
+parser.add_argument('--env', type=str, default='donkey-generated-track-v0',
                     choices=GYM_ENVS + CONTROL_SUITE_ENVS + DONKEY_CAR_ENVS)
 parser.add_argument('--symbolic', action='store_true', help='Symbolic (non-image) observations')
-parser.add_argument('--seed', type=int, default=1)
+parser.add_argument('--seed', type=int, default=42)
 parser.add_argument('--max-episode-length', type=int, default=1000)
 parser.add_argument('--action-repeat', type=int, default=1)
 
@@ -42,7 +45,7 @@ parser.add_argument('--pcont', action='store_true')
 parser.add_argument('--pcont_scale', type=int, default=10)
 
 # Training
-parser.add_argument('--episodes', type=int, default=50)
+parser.add_argument('--episodes', type=int, default=20)  # use 1000+ for real training
 parser.add_argument('--seed-episodes', type=int, default=5)
 parser.add_argument('--collect-interval', type=int, default=100)
 parser.add_argument('--batch-size', type=int, default=50)
@@ -106,14 +109,30 @@ results_dir = os.path.join('results', args.env, str(args.seed))
 os.makedirs(results_dir, exist_ok=True)
 os.makedirs('logs', exist_ok=True)
 
+run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+csv_path = os.path.join(results_dir, f'rewards_{run_id}.csv')
+csv_file = open(csv_path, 'w', newline='')
+csv_writer = csv.writer(csv_file)
+csv_writer.writerow([
+    'episode', 'steps', 'reward',
+    'mean_cte', 'max_cte', 'std_cte', 'survival_rate',
+    'obs_loss', 'kl_loss', 'reward_loss', 'actor_loss', 'value_loss',
+])
+csv_file.flush()
+print(f'Logging rewards to {csv_path}')
+
+random.seed(args.seed)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
 if torch.cuda.is_available() and not args.disable_cuda:
     args.device = torch.device('cuda')
-    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 elif torch.backends.mps.is_available() and not args.disable_cuda:
     args.device = torch.device('mps')
+    torch.mps.manual_seed(args.seed)
 else:
     args.device = torch.device('cpu')
 
@@ -122,6 +141,7 @@ metrics = {
     'test_episodes': [], 'test_rewards': [],
     'observation_loss': [], 'reward_loss': [], 'kl_loss': [],
     'actor_loss': [], 'value_loss': [],
+    'episode_lengths': [], 'mean_cte': [],
 }
 
 env = Env(args.env, args.symbolic, args.seed, args.max_episode_length,
@@ -182,6 +202,7 @@ for episode in tqdm(
         belief = torch.zeros(1, args.belief_size, device=args.device)
         posterior_state = torch.zeros(1, args.state_size, device=args.device)
         action = torch.zeros(1, env.action_size, device=args.device)
+        cte_history = []
 
         pbar = tqdm(range(args.max_episode_length // args.action_repeat))
         for t in pbar:
@@ -195,16 +216,41 @@ for episode in tqdm(
             agent.D.append(next_observation, action.cpu(), reward, done)
             total_reward += reward
             observation = next_observation
+            if hasattr(env, 'last_cte'):
+                cte_history.append(abs(env.last_cte))
             if args.render:
                 env.render()
             if done:
                 pbar.close()
                 break
 
+    ep_len = t + 1
+    cte_arr = np.array(cte_history) if cte_history else np.array([0.0])
     metrics['steps'].append(t + metrics['steps'][-1])
     metrics['episodes'].append(episode)
     metrics['train_rewards'].append(total_reward)
+    metrics['episode_lengths'].append(ep_len)
+    metrics['mean_cte'].append(float(cte_arr.mean()))
     lineplot(metrics['episodes'][-len(metrics['train_rewards']):], metrics['train_rewards'], 'train_rewards', results_dir)
+    lineplot(metrics['episodes'][-len(metrics['mean_cte']):], metrics['mean_cte'], 'mean_cte', results_dir)
+
+    csv_writer.writerow([
+        episode,
+        metrics['steps'][-1],
+        round(total_reward, 4),
+        # driving quality
+        round(float(cte_arr.mean()), 4),
+        round(float(cte_arr.max()), 4),
+        round(float(cte_arr.std()), 4),
+        round(ep_len / args.max_episode_length, 4),
+        # world model losses (mean over gradient steps this episode)
+        round(float(np.mean(losses[0])), 4),
+        round(float(np.mean(losses[2])), 4),
+        round(float(np.mean(losses[1])), 4),
+        round(float(np.mean(losses[4])), 4),
+        round(float(np.mean(losses[5])), 4),
+    ])
+    csv_file.flush()
 
     # --- Evaluation ---
     if episode % args.test_interval == 0:
@@ -286,3 +332,5 @@ for episode in tqdm(
             torch.save(agent.D, os.path.join(results_dir, 'experience.pth'))
 
 env.close()
+csv_file.close()
+print(f'Rewards saved to {csv_path}')

@@ -171,6 +171,8 @@ class DonkeyCarEnv:
         import gymnasium as gym
         import gym_donkeycar  # registers envs with gymnasium
         self.symbolic = symbolic
+        self._seed = seed
+        self._first_reset = True
         conf = {'host': host, 'port': port, 'max_cte': 4}
         if sim_path != 'self':
             conf['exe_path'] = sim_path
@@ -178,10 +180,20 @@ class DonkeyCarEnv:
         self.max_episode_length = max_episode_length
         self.action_repeat = action_repeat
         self.bit_depth = bit_depth
+        self.last_cte = 0.0
+        self.last_speed = 0.0
+        self.last_hit = False
 
     def reset(self):
         self.t = 0
-        obs, _ = self._env.reset()
+        self.last_cte = 0.0
+        # Pass seed only on the very first reset so subsequent episodes
+        # use the env's internal seeded RNG rather than resetting to the same state.
+        if self._first_reset:
+            obs, _ = self._env.reset(seed=self._seed)
+            self._first_reset = False
+        else:
+            obs, _ = self._env.reset()
         return _images_to_observation(obs, self.bit_depth)
 
     def step(self, action):
@@ -192,6 +204,10 @@ class DonkeyCarEnv:
             reward += reward_k
             self.t += 1
             done = terminated or truncated
+            # Cache latest telemetry from sim
+            self.last_cte = float(info.get('cte', 0.0))
+            self.last_speed = float(info.get('speed', 0.0))
+            self.last_hit = bool(info.get('hit', False))
             if done:
                 break
         observation = _images_to_observation(state, self.bit_depth)
