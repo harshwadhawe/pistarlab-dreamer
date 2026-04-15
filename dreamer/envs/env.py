@@ -20,6 +20,9 @@ CONTROL_SUITE_ACTION_REPEATS = {
 DONKEY_CAR_ENVS = [
     'donkey-warehouse-v0', 'donkey-generated-roads-v0', 'donkey-avc-sparkfun-v0',
     'donkey-generated-track-v0', 'donkey-mountain-track-v0',
+    'donkey-roboracingleague-track-v0', 'donkey-minimonaco-track-v0',
+    'donkey-thunderhill-track-v0', 'donkey-warren-track-v0',
+    'donkey-circuit-launch-track-v0', 'donkey-waveshare-v0',
 ]
 
 
