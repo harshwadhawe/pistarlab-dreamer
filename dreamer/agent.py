@@ -10,6 +10,7 @@ from torch.distributions.independent import Independent
 from torch.nn import functional as F
 from tqdm import tqdm
 
+from .augmentations import Augmenter
 from .memory import ExperienceReplay
 from .models import (
     bottle, Encoder, ObservationModel, RewardModel,
@@ -98,6 +99,8 @@ class Dreamer:
             args.experience_size, args.symbolic, args.observation_size,
             args.action_size, args.bit_depth, args.device,
         )
+
+        self.augmenter = Augmenter(device=args.device) if args.augment else None
 
         if self.args.auto_temp:
             self.log_temp = torch.zeros(1, requires_grad=True, device=args.device)
@@ -285,6 +288,9 @@ class Dreamer:
         loss_info = []
         for _ in tqdm(range(gradient_steps)):
             observations, actions, rewards, nonterminals = self.D.sample(self.args.batch_size, self.args.chunk_size)
+
+            if self.augmenter is not None and not self.args.symbolic:
+                observations = self.augmenter(observations)
 
             init_belief = torch.zeros(self.args.batch_size, self.args.belief_size, device=self.args.device)
             init_state = torch.zeros(self.args.batch_size, self.args.state_size, device=self.args.device)

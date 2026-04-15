@@ -112,6 +112,10 @@ parser.add_argument('--models', type=str, default='')
 parser.add_argument('--experience-replay', type=str, default='')
 parser.add_argument('--render', action='store_true')
 parser.add_argument('--disable-cuda', action='store_true')
+parser.add_argument('--augment', action='store_true', default=False,
+                    help='Apply sim-to-real augmentations during world-model training '
+                         '(brightness/contrast, shadow, blur, noise, gamma, erase, crop). '
+                         'Recommended for real-world deployment.')
 
 args = parser.parse_args()
 args.observation_size = (args.channels, 64, 64)  # derive from --channels
