@@ -16,14 +16,16 @@ env/
 venv/
 
 # Training outputs
-results/
+results/*
+!results/.gitkeep
 checkpoints/
 *.pth
 *.pt
 
 # Logs
 *.log
-logs/
+logs/*
+!logs/.gitkeep
 wandb/
 runs/
 
@@ -41,6 +43,8 @@ __MACOSX/
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
+
+results/*
 
 # IDE
 .idea/
