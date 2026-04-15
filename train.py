@@ -45,7 +45,7 @@ parser.add_argument('--pcont', action='store_true')
 parser.add_argument('--pcont_scale', type=int, default=10)
 
 # Training
-parser.add_argument('--episodes', type=int, default=20)  # use 1000+ for real training
+parser.add_argument('--episodes', type=int, default=30)  # use 1000+ for real training
 parser.add_argument('--seed-episodes', type=int, default=5)
 parser.add_argument('--collect-interval', type=int, default=100)
 parser.add_argument('--batch-size', type=int, default=50)
@@ -62,7 +62,7 @@ parser.add_argument('--learning-rate-schedule', type=int, default=0)
 parser.add_argument('--planning-horizon', type=int, default=15)
 parser.add_argument('--discount', type=float, default=0.99)
 parser.add_argument('--disclam', type=float, default=0.95)
-parser.add_argument('--expl_amount', type=float, default=0.3)
+parser.add_argument('--expl_amount', type=float, default=0.15)
 parser.add_argument('--with_logprob', action='store_true')
 parser.add_argument('--auto_temp', action='store_true')
 parser.add_argument('--temp', type=float, default=0.003)
@@ -89,6 +89,12 @@ parser.add_argument('--observation_size', default=(1, 40, 40))
 parser.add_argument('--sim_path', type=str, default='self')
 parser.add_argument('--port', type=int, default=9091)
 parser.add_argument('--host', type=str, default='127.0.0.1')
+parser.add_argument('--use_visual_reward', action='store_true', default=False,
+                    help='Replace CTE telemetry reward with image-based visual CTE proxy'
+                         ' (use when sim telemetry is unavailable or for real-world transfer)')
+parser.add_argument('--human_override', action='store_true', default=False,
+                    help='Open pygame window: operator presses SPACE to stop (off-track) '
+                         'or R to reset (clean lap). Removes all dependence on CTE telemetry.')
 
 # Evaluation & checkpointing
 parser.add_argument('--test', action='store_true')
@@ -152,9 +158,19 @@ metrics = {
     'episode_lengths': [], 'mean_cte': [],
 }
 
+human_override = None
+if args.human_override:
+    from dreamer.envs.human_override import HumanOverride
+    human_override = HumanOverride()
+    print('Human override active — pygame window open.')
+    print('  SPACE / S : stop (off-track penalty)')
+    print('  R         : reset (clean lap)')
+    print('  Q / ESC   : quit training')
+
 env = Env(args.env, args.symbolic, args.seed, args.max_episode_length,
           args.action_repeat, args.bit_depth, sim_path=args.sim_path,
-          host=args.host, port=args.port)
+          host=args.host, port=args.port, use_visual_reward=args.use_visual_reward,
+          human_override=human_override)
 agent = Dreamer(args)
 
 # ---------------------------------------------------------------------------
@@ -189,6 +205,14 @@ for episode in tqdm(
     total=args.episodes,
     initial=metrics['episodes'][-1] + 1,
 ):
+    if human_override and human_override.should_quit:
+        print('Quit requested via human override — stopping training.')
+        break
+
+    # Park the car while the world model trains (zero throttle)
+    if hasattr(env, 'brake'):
+        env.brake()
+
     # --- World model + actor + critic updates ---
     loss_info = agent.update_parameters(args.collect_interval)
 
@@ -224,7 +248,7 @@ for episode in tqdm(
             agent.D.append(next_observation, action.cpu(), reward, done)
             total_reward += reward
             observation = next_observation
-            if hasattr(env, 'last_cte'):
+            if hasattr(env, 'last_cte') and not args.human_override:
                 cte_history.append(abs(env.last_cte))
             if args.render:
                 env.render()

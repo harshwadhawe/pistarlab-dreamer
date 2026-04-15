@@ -165,28 +165,79 @@ class GymEnv:
         return torch.from_numpy(self._env.action_space.sample())
 
 
+def _visual_cte(frame_bgr):
+    """
+    Estimate lateral track offset from the camera image.
+    Used as a CTE proxy when --use_visual_reward is set (no sim telemetry needed).
+
+    Uses Canny edge detection to find the left/right track boundaries and
+    returns the normalised offset of their midpoint from the image centre.
+
+    Returns float in [-1, 1]: 0 = centred, ±1 = at track edge.
+    Returns None if track boundaries cannot be detected.
+    """
+    h, w = frame_bgr.shape[:2]
+    roi = frame_bgr[int(h * 0.4):, :]   # bottom 60% — avoids horizon clutter
+    roi_w = roi.shape[1]
+
+    gray  = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    blur  = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blur, 50, 150)
+
+    col_sum = edges.sum(axis=0).astype(np.float32)
+    if col_sum.max() == 0:
+        return None
+
+    mid = roi_w // 2
+    left_col  = int(np.argmax(col_sum[:mid]))
+    right_col = mid + int(np.argmax(col_sum[mid:]))
+
+    if col_sum[left_col] < 100 or col_sum[right_col] < 100:
+        return None   # edges too weak to be reliable
+
+    lane_cx = (left_col + right_col) / 2.0
+    return float((lane_cx - mid) / mid)
+
+
 class DonkeyCarEnv:
+    # Stuck detection: if speed stays below this threshold for this many consecutive
+    # steps, force episode termination (car parked against a wall within CTE limit).
+    STUCK_SPEED_THRESHOLD = 0.1
+    STUCK_STEPS_LIMIT = 15   # consecutive low-speed steps before forced done
+
     def __init__(self, env, symbolic, seed, max_episode_length, action_repeat, bit_depth,
-                 sim_path, host='127.0.0.1', port=9091):
+                 sim_path, host='127.0.0.1', port=9091, use_visual_reward=False,
+                 human_override=None):
         import gymnasium as gym
         import gym_donkeycar  # registers envs with gymnasium
         self.symbolic = symbolic
         self._seed = seed
         self._first_reset = True
+        self.use_visual_reward = use_visual_reward
+        self.human_override = human_override   # HumanOverride instance or None
         conf = {'host': host, 'port': port, 'max_cte': 4}
         if sim_path != 'self':
             conf['exe_path'] = sim_path
         self._env = gym.make(env, conf=conf)
+
         self.max_episode_length = max_episode_length
         self.action_repeat = action_repeat
         self.bit_depth = bit_depth
         self.last_cte = 0.0
         self.last_speed = 0.0
         self.last_hit = False
+        self._stuck_steps = 0
+        self._episode_reward = 0.0
+        self._episode_steps  = 0
+        self._episode_num    = 0
 
     def reset(self):
         self.t = 0
         self.last_cte = 0.0
+        self._stuck_steps = 0
+        self._episode_reward = 0.0
+        self._episode_steps  = 0
+        self._episode_num   += 1
         # Pass seed only on the very first reset so subsequent episodes
         # use the env's internal seeded RNG rather than resetting to the same state.
         if self._first_reset:
@@ -197,17 +248,69 @@ class DonkeyCarEnv:
         return _images_to_observation(obs, self.bit_depth)
 
     def step(self, action):
+        from .human_override import HumanOverride
         action = action.detach().numpy()
         reward = 0
         for _ in range(self.action_repeat):
             state, reward_k, terminated, truncated, info = self._env.step(action)
+
+            speed = float(info.get('speed', 0.0))
+            hit   = info.get('hit', 'none') != 'none'
+
+            if self.human_override is not None:
+                # Human operator decides BOTH reward and termination.
+                # Suppress sim's CTE-based terminated/reward entirely.
+                terminated = False
+                reward_k   = 1.0   # default: survived this step
+
+                ev = self.human_override.consume_event()
+                if ev == HumanOverride.STOP:
+                    reward_k   = -1.0
+                    terminated = True
+                elif ev == HumanOverride.RESET:
+                    reward_k   = 0.0
+                    terminated = True
+                elif ev == HumanOverride.QUIT:
+                    reward_k   = 0.0
+                    terminated = True
+
+                # Push latest frame + stats to the pygame display
+                self.human_override.update_frame(state, {
+                    'episode': self._episode_num,
+                    'steps':   self._episode_steps,
+                    'speed':   speed,
+                    'reward':  self._episode_reward,
+                })
+            elif self.use_visual_reward:
+                visual_cte = _visual_cte(state)
+                if visual_cte is None:
+                    reward_k = -1.0
+                    terminated = True
+                else:
+                    reward_k = (1.0 - abs(visual_cte)) * max(speed, 0.0)
+                    self.last_cte = visual_cte * 4.0
+                    terminated = terminated or abs(visual_cte) > 0.9
+            else:
+                self.last_cte = float(info.get('cte', 0.0))
+
+            if self.human_override is None:
+                # Automatic termination guards (not needed when human is watching)
+                if hit:
+                    terminated = True
+                if speed < self.STUCK_SPEED_THRESHOLD:
+                    self._stuck_steps += 1
+                else:
+                    self._stuck_steps = 0
+                if self._stuck_steps >= self.STUCK_STEPS_LIMIT:
+                    terminated = True
+
             reward += reward_k
             self.t += 1
+            self._episode_steps += 1
+            self._episode_reward += reward_k
+            self.last_speed = speed
+            self.last_hit = hit
             done = terminated or truncated
-            # Cache latest telemetry from sim
-            self.last_cte = float(info.get('cte', 0.0))
-            self.last_speed = float(info.get('speed', 0.0))
-            self.last_hit = bool(info.get('hit', False))
             if done:
                 break
         observation = _images_to_observation(state, self.bit_depth)
@@ -227,17 +330,29 @@ class DonkeyCarEnv:
     def action_size(self):
         return self._env.action_space.shape[0]
 
+    def brake(self):
+        """Send zero-throttle to park the car during world-model training."""
+        import numpy as np
+        stop = np.array([0.0, 0.0], dtype=np.float32)
+        try:
+            self._env.step(stop)
+        except Exception:
+            pass  # best-effort — don't crash training if sim drops the packet
+
     def sample_random_action(self):
         return torch.from_numpy(self._env.action_space.sample())
 
 
-def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth, sim_path, host, port):
+def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth, sim_path, host, port,
+        use_visual_reward=False, human_override=None):
     if env in GYM_ENVS:
         return GymEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth)
     elif env in CONTROL_SUITE_ENVS:
         return ControlSuiteEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth)
     elif env in DONKEY_CAR_ENVS:
-        return DonkeyCarEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth, sim_path, host, port)
+        return DonkeyCarEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth,
+                            sim_path, host, port, use_visual_reward=use_visual_reward,
+                            human_override=human_override)
     else:
         raise NotImplementedError(f'Unknown environment: {env}')
 
