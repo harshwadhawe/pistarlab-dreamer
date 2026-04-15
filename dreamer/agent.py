@@ -359,10 +359,17 @@ class Dreamer:
                 actor_loss.item(), critic_loss.item(),
             ])
 
-        # Hard update target value networks
+        # Polyak (soft) update target value networks
+        # θ_target = τ * θ_online + (1-τ) * θ_target
         with torch.no_grad():
-            self.target_value_model.load_state_dict(self.value_model.state_dict())
-            self.target_value_model2.load_state_dict(self.value_model2.state_dict())
+            for p_online, p_target in zip(
+                self.value_model.parameters(), self.target_value_model.parameters()
+            ):
+                p_target.data.mul_(1 - self.args.polyak).add_(self.args.polyak * p_online.data)
+            for p_online, p_target in zip(
+                self.value_model2.parameters(), self.target_value_model2.parameters()
+            ):
+                p_target.data.mul_(1 - self.args.polyak).add_(self.args.polyak * p_online.data)
 
         return loss_info
 

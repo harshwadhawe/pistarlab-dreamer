@@ -207,7 +207,7 @@ class DonkeyCarEnv:
 
     def __init__(self, env, symbolic, seed, max_episode_length, action_repeat, bit_depth,
                  sim_path, host='127.0.0.1', port=9091, use_visual_reward=False,
-                 human_override=None):
+                 human_override=None, smooth_weight=0.0):
         import gymnasium as gym
         import gym_donkeycar  # registers envs with gymnasium
         self.symbolic = symbolic
@@ -230,6 +230,8 @@ class DonkeyCarEnv:
         self._episode_reward = 0.0
         self._episode_steps  = 0
         self._episode_num    = 0
+        self.smooth_weight   = smooth_weight
+        self._prev_steer     = 0.0
 
     def reset(self):
         self.t = 0
@@ -238,6 +240,7 @@ class DonkeyCarEnv:
         self._episode_reward = 0.0
         self._episode_steps  = 0
         self._episode_num   += 1
+        self._prev_steer     = 0.0
         # Pass seed only on the very first reset so subsequent episodes
         # use the env's internal seeded RNG rather than resetting to the same state.
         if self._first_reset:
@@ -304,6 +307,12 @@ class DonkeyCarEnv:
                 if self._stuck_steps >= self.STUCK_STEPS_LIMIT:
                     terminated = True
 
+            # Action smoothness penalty — no sensor needed, uses steering output only
+            if self.smooth_weight > 0.0 and not terminated:
+                steer_diff = abs(float(action[0]) - self._prev_steer)
+                reward_k -= self.smooth_weight * steer_diff
+            self._prev_steer = float(action[0])
+
             reward += reward_k
             self.t += 1
             self._episode_steps += 1
@@ -344,7 +353,7 @@ class DonkeyCarEnv:
 
 
 def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth, sim_path, host, port,
-        use_visual_reward=False, human_override=None):
+        use_visual_reward=False, human_override=None, smooth_weight=0.0):
     if env in GYM_ENVS:
         return GymEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth)
     elif env in CONTROL_SUITE_ENVS:
@@ -352,7 +361,7 @@ def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth, sim_p
     elif env in DONKEY_CAR_ENVS:
         return DonkeyCarEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth,
                             sim_path, host, port, use_visual_reward=use_visual_reward,
-                            human_override=human_override)
+                            human_override=human_override, smooth_weight=smooth_weight)
     else:
         raise NotImplementedError(f'Unknown environment: {env}')
 

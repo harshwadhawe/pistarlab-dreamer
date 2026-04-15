@@ -62,6 +62,8 @@ parser.add_argument('--learning-rate-schedule', type=int, default=0)
 parser.add_argument('--planning-horizon', type=int, default=15)
 parser.add_argument('--discount', type=float, default=0.99)
 parser.add_argument('--disclam', type=float, default=0.95)
+parser.add_argument('--polyak', type=float, default=0.005,
+                    help='Soft target update rate: θ_target = (1-polyak)*θ_target + polyak*θ_online')
 parser.add_argument('--expl_amount', type=float, default=0.15)
 parser.add_argument('--with_logprob', action='store_true')
 parser.add_argument('--auto_temp', action='store_true')
@@ -95,6 +97,9 @@ parser.add_argument('--use_visual_reward', action='store_true', default=False,
 parser.add_argument('--human_override', action='store_true', default=False,
                     help='Open pygame window: operator presses SPACE to stop (off-track) '
                          'or R to reset (clean lap). Removes all dependence on CTE telemetry.')
+parser.add_argument('--smooth_weight', type=float, default=0.05,
+                    help='Penalty weight for steering jerk: reward -= smooth_weight * |steer_t - steer_{t-1}|. '
+                         'No sensor needed. Set 0 to disable.')
 
 # Evaluation & checkpointing
 parser.add_argument('--test', action='store_true')
@@ -170,7 +175,7 @@ if args.human_override:
 env = Env(args.env, args.symbolic, args.seed, args.max_episode_length,
           args.action_repeat, args.bit_depth, sim_path=args.sim_path,
           host=args.host, port=args.port, use_visual_reward=args.use_visual_reward,
-          human_override=human_override)
+          human_override=human_override, smooth_weight=args.smooth_weight)
 agent = Dreamer(args)
 
 # ---------------------------------------------------------------------------
