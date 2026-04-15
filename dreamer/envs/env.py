@@ -223,7 +223,7 @@ class DonkeyCarEnv:
 
     def __init__(self, env, symbolic, seed, max_episode_length, action_repeat, bit_depth,
                  sim_path, host='127.0.0.1', port=9091, use_visual_reward=False,
-                 human_override=None, smooth_weight=0.0):
+                 human_override=None, smooth_weight=0.0, channels=1):
         import gymnasium as gym
         import gym_donkeycar  # registers envs with gymnasium
         self.symbolic = symbolic
@@ -248,6 +248,7 @@ class DonkeyCarEnv:
         self._episode_num    = 0
         self.smooth_weight   = smooth_weight
         self._prev_steer     = 0.0
+        self._channels       = channels
 
     def reset(self):
         self.t = 0
@@ -264,7 +265,7 @@ class DonkeyCarEnv:
             self._first_reset = False
         else:
             obs, _ = self._env.reset()
-        return _images_to_observation(obs, self.bit_depth)
+        return _images_to_observation(obs, self.bit_depth, channels=self._channels)
 
     def step(self, action):
         from .human_override import HumanOverride
@@ -338,7 +339,7 @@ class DonkeyCarEnv:
             done = terminated or truncated
             if done:
                 break
-        observation = _images_to_observation(state, self.bit_depth)
+        observation = _images_to_observation(state, self.bit_depth, channels=self._channels)
         return observation, reward, done
 
     def render(self):
@@ -349,7 +350,7 @@ class DonkeyCarEnv:
 
     @property
     def observation_size(self):
-        return self._env.observation_space.shape[0] if self.symbolic else (3, 64, 64)
+        return self._env.observation_space.shape[0] if self.symbolic else (self._channels, 64, 64)
 
     @property
     def action_size(self):
@@ -369,7 +370,7 @@ class DonkeyCarEnv:
 
 
 def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth, sim_path, host, port,
-        use_visual_reward=False, human_override=None, smooth_weight=0.0):
+        use_visual_reward=False, human_override=None, smooth_weight=0.0, channels=1):
     if env in GYM_ENVS:
         return GymEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth)
     elif env in CONTROL_SUITE_ENVS:
@@ -377,7 +378,8 @@ def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth, sim_p
     elif env in DONKEY_CAR_ENVS:
         return DonkeyCarEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth,
                             sim_path, host, port, use_visual_reward=use_visual_reward,
-                            human_override=human_override, smooth_weight=smooth_weight)
+                            human_override=human_override, smooth_weight=smooth_weight,
+                            channels=channels)
     else:
         raise NotImplementedError(f'Unknown environment: {env}')
 
