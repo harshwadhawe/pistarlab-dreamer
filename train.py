@@ -85,7 +85,7 @@ parser.add_argument('--throttle_max', type=float, default=0.5)
 parser.add_argument('--angle_min', type=float, default=-1)
 parser.add_argument('--angle_max', type=float, default=1)
 parser.add_argument('--action_size', default=2)
-parser.add_argument('--observation_size', default=(1, 40, 40))
+parser.add_argument('--observation_size', default=(1, 64, 64))  # phase B: 1×64×64 grayscale; phase A: change to (3,64,64) for RGB
 
 # Simulator / connection
 parser.add_argument('--sim_path', type=str, default='self')

@@ -110,11 +110,9 @@ class Dreamer:
         self._ret_ema_low = 1.0
         self._ret_ema_high = 1.0
 
-    def process_im(self, images, image_size=None, rgb=None):
-        images = cv2.resize(images, (40, 40))
-        images = np.dot(images, [0.299, 0.587, 0.114])
-        obs = torch.tensor(images, dtype=torch.float32).div_(255.).sub_(0.5).unsqueeze(dim=0)
-        return obs.unsqueeze(dim=0)
+    def process_im(self, images, image_size=64, rgb=None):
+        from .envs.env import _images_to_observation
+        return _images_to_observation(images, self.args.bit_depth)
 
     def append_buffer(self, new_traj):
         for observation, action, reward, done in new_traj:

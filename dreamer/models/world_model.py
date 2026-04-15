@@ -110,19 +110,27 @@ class SymbolicObservationModel(jit.ScriptModule):
 
 
 class VisualObservationModel(jit.ScriptModule):
-    """4-layer transposed CNN decoder: (belief, state) → 1×40×40 image."""
+    """
+    4-layer transposed CNN decoder: (belief, state) → channels×64×64 image.
+
+    channels=1  grayscale (phase B, current default)
+    channels=3  RGB       (phase A — update --observation_size to (3,64,64))
+
+    Spatial trace: 1×1 → 5×5 → 13×13 → 30×30 → 64×64
+    """
 
     __constants__ = ['embedding_size']
 
-    def __init__(self, belief_size, state_size, embedding_size, activation_function='relu'):
+    def __init__(self, belief_size, state_size, embedding_size,
+                 activation_function='relu', channels=1):
         super().__init__()
         self.act_fn = getattr(F, activation_function)
         self.embedding_size = embedding_size
-        self.fc1 = nn.Linear(belief_size + state_size, embedding_size)
-        self.conv1 = nn.ConvTranspose2d(embedding_size, 128, 3, stride=2)
-        self.conv2 = nn.ConvTranspose2d(128, 64, 4, stride=2)
-        self.conv3 = nn.ConvTranspose2d(64, 32, 4, stride=2)
-        self.conv4 = nn.ConvTranspose2d(32, 1, 6, stride=2)
+        self.fc1    = nn.Linear(belief_size + state_size, embedding_size)
+        self.conv1  = nn.ConvTranspose2d(embedding_size, 128, 5, stride=2)
+        self.conv2  = nn.ConvTranspose2d(128, 64, 5, stride=2)
+        self.conv3  = nn.ConvTranspose2d(64,  32, 6, stride=2)
+        self.conv4  = nn.ConvTranspose2d(32, channels, 6, stride=2)
 
     @jit.script_method
     def forward(self, belief, state):
@@ -137,7 +145,8 @@ class VisualObservationModel(jit.ScriptModule):
 def ObservationModel(symbolic, observation_size, belief_size, state_size, embedding_size, activation_function='relu'):
     if symbolic:
         return SymbolicObservationModel(observation_size, belief_size, state_size, embedding_size, activation_function)
-    return VisualObservationModel(belief_size, state_size, embedding_size, activation_function)
+    channels = observation_size[0] if not symbolic else 1
+    return VisualObservationModel(belief_size, state_size, embedding_size, activation_function, channels=channels)
 
 
 class SymbolicEncoder(jit.ScriptModule):
@@ -156,19 +165,26 @@ class SymbolicEncoder(jit.ScriptModule):
 
 
 class VisualEncoder(jit.ScriptModule):
-    """4-layer CNN: 1×40×40 image → 1024-D embedding."""
+    """
+    4-layer CNN: channels×64×64 image → 1024-D embedding.
+
+    channels=1  grayscale (phase B, current default)
+    channels=3  RGB       (phase A — update --observation_size to (3,64,64))
+
+    Spatial trace: 64×64 → 31×31 → 14×14 → 6×6 → 2×2 → flat 1024
+    """
 
     __constants__ = ['embedding_size']
 
-    def __init__(self, embedding_size, activation_function='relu'):
+    def __init__(self, embedding_size, activation_function='relu', channels=1):
         super().__init__()
         self.act_fn = getattr(F, activation_function)
         self.embedding_size = embedding_size
-        self.conv1 = nn.Conv2d(1, 32, 4, stride=2)
-        self.conv2 = nn.Conv2d(32, 64, 3, stride=2)
-        self.conv3 = nn.Conv2d(64, 128, 3, stride=2)
-        self.conv4 = nn.Conv2d(128, 256, 3)
-        self.fc = nn.Identity() if embedding_size == 1024 else nn.Linear(1024, embedding_size)
+        self.conv1 = nn.Conv2d(channels, 32,  4, stride=2)
+        self.conv2 = nn.Conv2d(32,        64,  4, stride=2)
+        self.conv3 = nn.Conv2d(64,       128,  4, stride=2)
+        self.conv4 = nn.Conv2d(128,      256,  4, stride=2)
+        self.fc    = nn.Identity() if embedding_size == 1024 else nn.Linear(1024, embedding_size)
 
     @jit.script_method
     def forward(self, observation):
@@ -183,7 +199,8 @@ class VisualEncoder(jit.ScriptModule):
 def Encoder(symbolic, observation_size, embedding_size, activation_function='relu'):
     if symbolic:
         return SymbolicEncoder(observation_size, embedding_size, activation_function)
-    return VisualEncoder(embedding_size, activation_function)
+    channels = observation_size[0] if not symbolic else 1
+    return VisualEncoder(embedding_size, activation_function, channels=channels)
 
 
 class RewardModel(jit.ScriptModule):

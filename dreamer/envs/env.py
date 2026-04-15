@@ -40,13 +40,23 @@ def postprocess_observation(observation, bit_depth):
     ).astype(np.uint8)
 
 
-def _images_to_observation(images, bit_depth):
-    """Crop top 40 rows, resize to 40×40, convert to grayscale tensor [-0.5, 0.5]."""
+def _images_to_observation(images, bit_depth, channels=1):
+    """
+    Crop top 40 rows, resize to IMAGE_SIZE×IMAGE_SIZE, return tensor [-0.5, 0.5].
+
+    channels=1  → grayscale (1×64×64)   phase B
+    channels=3  → RGB       (3×64×64)   phase A (future)
+    """
+    IMAGE_SIZE = 64
     images = images[40:, :, :]
-    images = cv2.resize(images, (40, 40))
-    images = np.dot(images, [0.299, 0.587, 0.114])
-    obs = torch.tensor(images, dtype=torch.float32).div_(255.).sub_(0.5).unsqueeze(dim=0)
-    return obs.unsqueeze(dim=0)
+    images = cv2.resize(images, (IMAGE_SIZE, IMAGE_SIZE))
+    if channels == 1:
+        images = np.dot(images, [0.299, 0.587, 0.114])
+        obs = torch.tensor(images, dtype=torch.float32).div_(255.).sub_(0.5).unsqueeze(0)
+    else:
+        # RGB: HWC → CHW
+        obs = torch.tensor(images, dtype=torch.float32).div_(255.).sub_(0.5).permute(2, 0, 1)
+    return obs.unsqueeze(0)  # add batch dim → (1, C, H, W)
 
 
 class ControlSuiteEnv:
