@@ -17,6 +17,7 @@ class TransitionModel(nn.Module):
         self.min_std_dev = min_std_dev
         self.fc_embed_state_action = nn.Linear(state_size + action_size, belief_size)
         self.rnn = nn.GRUCell(belief_size, belief_size)
+        self.rnn_norm = nn.LayerNorm(belief_size)
         self.fc_embed_belief_prior = nn.Linear(belief_size, hidden_size)
         self.fc_state_prior = nn.Linear(hidden_size, 2 * state_size)
         self.fc_embed_belief_posterior = nn.Linear(belief_size + embedding_size, hidden_size)
@@ -62,7 +63,7 @@ class TransitionModel(nn.Module):
                 _state = _state * nonterminals[t - 1].unsqueeze(dim=-1)
 
             hidden = self.act_fn(self.fc_embed_state_action(torch.cat([_state, actions[t]], dim=1)))
-            beliefs[t + 1] = self.rnn(hidden, beliefs[t])
+            beliefs[t + 1] = self.rnn_norm(self.rnn(hidden, beliefs[t]))
 
             hidden = self.act_fn(self.fc_embed_belief_prior(beliefs[t + 1]))
             prior_means[t + 1], _prior_std = torch.chunk(self.fc_state_prior(hidden), 2, dim=1)

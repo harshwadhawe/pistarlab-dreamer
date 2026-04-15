@@ -1,6 +1,16 @@
 import torch
 
 
+def symlog(x):
+    """Symmetric log: sign(x) * ln(|x| + 1). Compresses large reward scales."""
+    return torch.sign(x) * torch.log(torch.abs(x) + 1)
+
+
+def symexp(x):
+    """Inverse of symlog: sign(x) * (exp(|x|) - 1)."""
+    return torch.sign(x) * (torch.exp(torch.abs(x)) - 1)
+
+
 def bottle(f, x_tuple):
     """Reshape [time, batch, ...] -> [time*batch, ...], apply f, reshape back."""
     x_sizes = tuple(map(lambda x: x.size(), x_tuple))

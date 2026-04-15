@@ -38,7 +38,7 @@ parser.add_argument('--belief-size', type=int, default=200)
 parser.add_argument('--state-size', type=int, default=30)
 parser.add_argument('--cnn-act', type=str, default='relu', choices=dir(F))
 parser.add_argument('--dense-act', type=str, default='elu', choices=dir(F))
-parser.add_argument('--free-nats', type=float, default=3)
+parser.add_argument('--free-nats', type=float, default=1)  # lowered from 3 — pairs with KL balancing
 parser.add_argument('--bit-depth', type=int, default=8)
 parser.add_argument('--reward_scale', type=int, default=10)
 parser.add_argument('--pcont', action='store_true')
@@ -66,6 +66,14 @@ parser.add_argument('--expl_amount', type=float, default=0.3)
 parser.add_argument('--with_logprob', action='store_true')
 parser.add_argument('--auto_temp', action='store_true')
 parser.add_argument('--temp', type=float, default=0.003)
+
+# Dreamer v2/v3 improvements (all on by default; use --no-X to ablate)
+parser.add_argument('--kl_balance', action=argparse.BooleanOptionalAction, default=True,
+                    help='KL balancing: separate dynamics/representation loss (Dreamer v2)')
+parser.add_argument('--symlog_rewards', action=argparse.BooleanOptionalAction, default=True,
+                    help='Symlog-compress rewards before reward model training (Dreamer v3)')
+parser.add_argument('--return_norm', action=argparse.BooleanOptionalAction, default=True,
+                    help='Normalise returns by running 5th/95th percentile range (Dreamer v3)')
 
 # Action constraints (DonkeyCar)
 parser.add_argument('--fix_speed', action='store_true', default=True)

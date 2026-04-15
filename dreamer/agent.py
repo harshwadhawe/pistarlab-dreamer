@@ -15,7 +15,7 @@ from .models import (
     bottle, Encoder, ObservationModel, RewardModel,
     TransitionModel, ValueModel, ActorModel, PCONTModel,
 )
-from .utils.math_utils import cal_returns
+from .utils.math_utils import cal_returns, symlog, symexp
 
 
 def count_vars(module):
@@ -106,6 +106,10 @@ class Dreamer:
             ).item()
             self.temp_optimizer = optim.Adam([self.log_temp], lr=args.value_lr)
 
+        # Return normalisation EMAs (Dreamer v3)
+        self._ret_ema_low = 1.0
+        self._ret_ema_high = 1.0
+
     def process_im(self, images, image_size=None, rgb=None):
         images = cv2.resize(images, (40, 40))
         images = np.dot(images, [0.299, 0.587, 0.114])
@@ -130,19 +134,35 @@ class Dreamer:
             reduction='none',
         ).sum(dim=2 if self.args.symbolic else (2, 3, 4)).mean(dim=(0, 1))
 
+        reward_target = symlog(rewards) if self.args.symlog_rewards else rewards
         reward_loss = F.mse_loss(
             bottle(self.reward_model, (beliefs, posterior_states)),
-            rewards,
+            reward_target,
             reduction='none',
         ).mean(dim=(0, 1))
 
-        kl_loss = torch.max(
-            kl_divergence(
-                Independent(Normal(posterior_means, posterior_std_devs), 1),
+        # KL balancing (Dreamer v2): separate dynamics loss and representation loss
+        if self.args.kl_balance:
+            kl_lhs = kl_divergence(
+                Independent(Normal(posterior_means.detach(), posterior_std_devs.detach()), 1),
                 Independent(Normal(prior_means, prior_std_devs), 1),
-            ),
-            self.free_nats,
-        ).mean(dim=(0, 1))
+            )  # trains prior / dynamics model
+            kl_rhs = kl_divergence(
+                Independent(Normal(posterior_means, posterior_std_devs), 1),
+                Independent(Normal(prior_means.detach(), prior_std_devs.detach()), 1),
+            )  # trains posterior / encoder
+            kl_loss = (
+                0.8 * torch.max(kl_lhs, self.free_nats) +
+                0.2 * torch.max(kl_rhs, self.free_nats)
+            ).mean(dim=(0, 1))
+        else:
+            kl_loss = torch.max(
+                kl_divergence(
+                    Independent(Normal(posterior_means, posterior_std_devs), 1),
+                    Independent(Normal(prior_means, prior_std_devs), 1),
+                ),
+                self.free_nats,
+            ).mean(dim=(0, 1))
 
         pcont_loss = 0
         if self.args.pcont:
@@ -159,6 +179,9 @@ class Dreamer:
 
     def _compute_loss_actor(self, imag_beliefs, imag_states, imag_ac_logps=None):
         imag_rewards = bottle(self.reward_model, (imag_beliefs, imag_states))
+        if self.args.symlog_rewards:
+            imag_rewards = symexp(imag_rewards)
+
         imag_values = torch.min(
             bottle(self.value_model, (imag_beliefs, imag_states)),
             bottle(self.value_model2, (imag_beliefs, imag_states)),
@@ -176,8 +199,18 @@ class Dreamer:
             imag_values[1:] -= self.args.temp * imag_ac_logps
 
         returns = cal_returns(imag_rewards[:-1], imag_values[:-1], imag_values[-1], pcont[:-1], lambda_=self.args.disclam)
-        discount = torch.cumprod(torch.cat([torch.ones_like(pcont[:1]), pcont[:-2]], 0), 0).detach()
 
+        # Return normalisation (Dreamer v3): scale by running 5th/95th percentile range
+        if self.args.return_norm:
+            with torch.no_grad():
+                p5  = torch.quantile(returns, 0.05).item()
+                p95 = torch.quantile(returns, 0.95).item()
+            self._ret_ema_low  = 0.99 * self._ret_ema_low  + 0.01 * p5
+            self._ret_ema_high = 0.99 * self._ret_ema_high + 0.01 * p95
+            S = max(1.0, self._ret_ema_high - self._ret_ema_low)
+            returns = returns / S
+
+        discount = torch.cumprod(torch.cat([torch.ones_like(pcont[:1]), pcont[:-2]], 0), 0).detach()
         assert list(discount.size()) == list(returns.size())
         return -torch.mean(discount * returns)
 
@@ -188,6 +221,8 @@ class Dreamer:
                 bottle(self.target_value_model2, (imag_beliefs, imag_states)),
             )
             imag_rewards = bottle(self.reward_model, (imag_beliefs, imag_states))
+            if self.args.symlog_rewards:
+                imag_rewards = symexp(imag_rewards)
             pcont = (
                 bottle(self.pcont_model, (imag_beliefs, imag_states))
                 if self.args.pcont
