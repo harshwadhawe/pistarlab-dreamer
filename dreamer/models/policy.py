@@ -100,7 +100,8 @@ class ActorModel(nn.Module):
         logp_pi = dist.log_prob(action).sum(dim=1) if with_logprob else None
 
         if self.fix_speed:
-            throttle = self.throttle_base * torch.ones_like(action, requires_grad=False)
+            throttle = torch.full((action.shape[0], 1), self.throttle_base,
+                                  dtype=action.dtype, device=action.device)
             action = torch.cat((action, throttle), dim=-1)
 
         return action, logp_pi

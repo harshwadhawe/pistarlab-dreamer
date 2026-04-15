@@ -326,7 +326,7 @@ class Dreamer:
 
             # --- Temperature update (auto_temp) ---
             if self.args.auto_temp:
-                temp_loss = -(self.log_temp * (imag_ac_logps[0] + self.target_entropy).detach()).mean()
+                temp_loss = -(self.log_temp * (imag_ac_logps + self.target_entropy).detach()).mean()
                 self.temp_optimizer.zero_grad()
                 temp_loss.backward()
                 self.temp_optimizer.step()

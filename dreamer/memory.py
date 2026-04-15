@@ -56,5 +56,11 @@ class ExperienceReplay:
         )
 
     def sample(self, n, L):
+        available = self.size if self.full else self.idx
+        if available < L:
+            raise RuntimeError(
+                f"Replay buffer has {available} steps but chunk_size={L}. "
+                f"Collect more seed episodes before training."
+            )
         batch = self._retrieve_batch(np.asarray([self._sample_idx(L) for _ in range(n)]), n, L)
         return [torch.as_tensor(item).to(device=self.device) for item in batch]
