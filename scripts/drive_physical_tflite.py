@@ -178,6 +178,10 @@ class PhysicalDreamerCar:
 
             self.sender, self.model_sub = make_comms(args.server_ip)
 
+            print('[INFO] Connecting PS4 controller...')
+            from dreamer.envs.ps4_override import PS4Override
+            self.ps4 = PS4Override()
+
             print('[OK] All systems nominal.\n')
 
         except Exception as e:
@@ -209,72 +213,75 @@ class PhysicalDreamerCar:
     def run(self):
         print('='*52)
         print('  AUTONOMOUS MODE')
-        print('  Ctrl+C → end episode + send to server, repeat')
-        print('  Ctrl+C twice quickly → quit')
+        print('  ○ Circle   → STOP  (off-track, reward -1)')
+        print('  × Cross    → RESET (clean lap,  reward  0)')
+        print('  △ Triangle → QUIT  (end session)')
+        print('  □ Square   → PAUSE (hold zero throttle)')
         print('='*52 + '\n')
 
         episode_num = 0
 
-        while True:
+        while not self.ps4.should_quit:
             obs_buf, act_buf, rew_buf, done_buf = [], [], [], []
             self.model.reset_state()
-            episode_done = False
 
             print(f'[Car] Episode {episode_num} — running...')
 
-            try:
-                while not episode_done:
-                    t0 = time.time()
+            while True:
+                t0 = time.time()
 
-                    frame  = self.camera.run()
-                    obs    = self.preprocess(frame)
-                    action = self.model.step(obs)
+                # PAUSE — hold zero throttle until released
+                if self.ps4.is_paused:
+                    self.send_zero()
+                    time.sleep(0.05)
+                    continue
 
-                    s, t = self.send_action(float(action[0]), float(action[1]))
+                frame  = self.camera.run()
+                obs    = self.preprocess(frame)
+                action = self.model.step(obs)
+                s, t   = self.send_action(float(action[0]), float(action[1]))
 
-                    # Default: survival reward of +1 per step
-                    reward = 1.0
-                    done   = False
+                ev     = self.ps4.consume_event()
+                if ev == self.ps4.STOP:
+                    reward, done = -1.0, True
+                elif ev == self.ps4.RESET:
+                    reward, done =  0.0, True
+                else:
+                    reward, done =  1.0, False
 
-                    obs_buf.append(obs.copy())
-                    act_buf.append(action.copy())
-                    rew_buf.append(reward)
-                    done_buf.append(done)
+                obs_buf.append(obs.copy())
+                act_buf.append(action.copy())
+                rew_buf.append(reward)
+                done_buf.append(done)
 
-                    # Poll for new model from server
-                    update = self.model_sub.poll()
-                    if update:
-                        self.model.reload(update['model_bytes'])
-                        print(f'[Car] Model updated — server step {update["step"]}')
+                # Poll for new model from server
+                update = self.model_sub.poll()
+                if update:
+                    self.model.reload(update['model_bytes'])
+                    print(f'\n[Car] Model updated — server step {update["step"]}')
 
-                    fps = 1.0 / max(time.time() - t0, 1e-6)
-                    print(
-                        f'[Ep {episode_num}] FPS: {fps:4.1f} | '
-                        f'Steer: {s:>6.3f} | Throt: {t:>5.3f} | '
-                        f'Steps: {len(rew_buf):>4d}',
-                        end='\r',
-                    )
+                fps = 1.0 / max(time.time() - t0, 1e-6)
+                print(
+                    f'[Ep {episode_num}] FPS:{fps:4.1f} | '
+                    f'Steer:{s:>6.3f} | Throt:{t:>5.3f} | '
+                    f'Steps:{len(rew_buf):>4d}',
+                    end='\r',
+                )
 
-            except KeyboardInterrupt:
-                # Mark final step as terminal
-                episode_done = True
-                if done_buf:
-                    done_buf[-1] = True
-                    rew_buf[-1]  = -1.0   # off-track / manual stop penalty
+                if done or self.ps4.should_quit:
+                    break
 
-            finally:
-                self.send_zero()
+            self.send_zero()
 
             if not obs_buf:
-                print('\n[Car] Empty episode — skipping.')
                 break
 
-            steps = len(rew_buf)
+            steps   = len(rew_buf)
             total_r = sum(rew_buf)
             print(f'\n[Car] Episode {episode_num} done — '
-                  f'{steps} steps, reward {total_r:.1f}')
+                  f'{steps} steps | reward {total_r:.1f}')
 
-            if args.server_ip:
+            if self.args.server_ip:
                 self.sender.send(
                     obs=np.stack(obs_buf).astype(np.float32),
                     actions=np.stack(act_buf).astype(np.float32),
@@ -286,15 +293,7 @@ class PhysicalDreamerCar:
 
             episode_num += 1
 
-            # Second Ctrl+C exits the loop; first one ends the episode
-            try:
-                print('[Car] Press Ctrl+C again within 3s to quit, '
-                      'or wait to start next episode...')
-                time.sleep(3)
-            except KeyboardInterrupt:
-                print('\n[Car] Quitting.')
-                break
-
+        self.ps4.stop()
         self.shutdown()
 
     def shutdown(self):
