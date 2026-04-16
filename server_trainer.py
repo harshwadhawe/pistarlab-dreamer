@@ -102,10 +102,10 @@ parser.add_argument('--augment',           action='store_true', default=True,
 # Server-specific
 parser.add_argument('--bind_ip',           type=str,   default='*',
                     help='IP to bind ZMQ sockets (default: all interfaces)')
-parser.add_argument('--min_buffer_steps',  type=int,   default=1000,
-                    help='Minimum replay buffer steps before training starts')
-parser.add_argument('--push_interval',     type=int,   default=2,
-                    help='Export + push TFLite to car every N episodes')
+parser.add_argument('--seed-episodes',     type=int,   default=5,
+                    help='Collect this many episodes before training starts (mirrors sim)')
+parser.add_argument('--push_interval',     type=int,   default=1,
+                    help='Export + push TFLite to car every N episodes (default 1 — every episode)')
 parser.add_argument('--checkpoint_interval', type=int, default=50,
                     help='Save .pth checkpoint every N episodes')
 
@@ -257,7 +257,7 @@ def save_checkpoint(episode_count: int) -> None:
 # Main training loop
 # ---------------------------------------------------------------------------
 print(f'\n[Server] Waiting for episodes from car. '
-      f'Training starts after {args.min_buffer_steps} buffer steps.\n')
+      f'Training starts after {args.seed_episodes} seed episodes.\n')
 
 episode_count = 0
 
@@ -287,7 +287,7 @@ while episode_count < args.episodes:
           f'buffer {agent.D.steps:>7d} steps')
 
     loss_info = None
-    if agent.D.steps >= args.min_buffer_steps:
+    if episode_count > args.seed_episodes:
         print(f'[Server] Training {args.collect_interval} gradient steps...')
         loss_info = agent.update_parameters(args.collect_interval)
         losses = np.mean(loss_info, axis=0)
@@ -295,8 +295,7 @@ while episode_count < args.episodes:
         print(f'[Server] obs={obs_l:.4f} rew={rew_l:.4f} kl={kl_l:.4f} '
               f'actor={act_l:.4f} value={val_l:.4f}')
     else:
-        print(f'[Server] Buffer warming up '
-              f'({agent.D.steps}/{args.min_buffer_steps} steps) — skipping training.')
+        print(f'[Server] Seed episode {episode_count}/{args.seed_episodes} — skipping training.')
         losses = [0, 0, 0, 0, 0, 0]
 
     csv_writer.writerow([
@@ -306,6 +305,8 @@ while episode_count < args.episodes:
     ])
     csv_file.flush()
 
+    # Always push — car blocks waiting for this to unblock before next episode.
+    # Background thread so training loop isn't delayed by export subprocess.
     if episode_count % args.push_interval == 0:
         export_and_publish(episode_count)
 

@@ -7,6 +7,10 @@ Server side:    same classes, just different socket roles.
 Ports:
   5555 — experience  (Car PUSH  → Server PULL)
   5556 — model       (Server PUB → Car SUB)
+
+After each episode the car halts (zero throttle) and blocks on port 5556
+until a new model arrives. The server always exports+publishes after every
+episode (background thread), so the car unblocks as soon as export finishes.
 """
 
 import pickle

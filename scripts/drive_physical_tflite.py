@@ -260,12 +260,6 @@ class PhysicalDreamerCar:
                 rew_buf.append(reward)
                 done_buf.append(done)
 
-                # Poll for new model from server
-                update = self.model_sub.poll()
-                if update:
-                    self.model.reload(update['model_bytes'])
-                    print(f'\n[Car] Model updated — server step {update["step"]}')
-
                 fps = 1.0 / max(time.time() - t0, 1e-6)
                 print(
                     f'[Ep {episode_num}] FPS:{fps:4.1f} | '
@@ -301,6 +295,21 @@ class PhysicalDreamerCar:
 
             if self.ps4.should_quit:
                 break
+
+            # Halt until server pushes a new model (blocks during training).
+            # Keeps motors zeroed. Noop when running standalone.
+            if self.args.server_ip:
+                print('[Car] HALTED — waiting for new model from server...')
+                while True:
+                    self.send_zero()
+                    update = self.model_sub.poll()
+                    if update:
+                        self.model.reload(update['model_bytes'])
+                        print(f'[Car] New model arrived (server step {update["step"]}) — resuming.')
+                        break
+                    if self.ps4.should_quit:
+                        break
+                    time.sleep(0.05)
 
             # Wait for R1 before starting next episode
             print('[Car] Press R1 to start next episode | △ to quit...')
