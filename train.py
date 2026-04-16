@@ -10,10 +10,6 @@ from torch.nn import functional as F
 from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 
-import os
-os.environ['WANDB_MODE'] = 'disabled'
-import wandb
-
 from dreamer.envs import GYM_ENVS, CONTROL_SUITE_ENVS, DONKEY_CAR_ENVS, Env, EnvBatcher
 from dreamer.agent import Dreamer
 from dreamer.utils import lineplot, write_video
@@ -85,8 +81,9 @@ parser.add_argument('--throttle_max', type=float, default=0.5)
 parser.add_argument('--angle_min', type=float, default=-1)
 parser.add_argument('--angle_max', type=float, default=1)
 parser.add_argument('--action_size', default=2)
-parser.add_argument('--channels', type=int, default=1, help='Image channels: 1=grayscale (phase B), 3=RGB (phase A)')
-parser.add_argument('--observation_size', default=None)  # set automatically from --channels below
+parser.add_argument('--grayscale', action='store_true', default=False,
+                    help='Use 1-channel grayscale input. Default: 3-channel RGB.')
+parser.add_argument('--observation_size', default=None)  # set automatically from --grayscale below
 
 # Simulator / connection
 parser.add_argument('--sim_path', type=str, default='self')
@@ -118,10 +115,8 @@ parser.add_argument('--augment', action='store_true', default=False,
                          'Recommended for real-world deployment.')
 
 args = parser.parse_args()
-args.observation_size = (args.channels, 64, 64)  # derive from --channels
-
-wandb.init(project='donkey_sac')
-wandb.config.update(args)
+args.channels = 1 if args.grayscale else 3
+args.observation_size = (args.channels, 64, 64)
 
 print(' ' * 26 + 'Options')
 for k, v in vars(args).items():
@@ -131,8 +126,11 @@ for k, v in vars(args).items():
 # Setup
 # ---------------------------------------------------------------------------
 results_dir = os.path.join('results', args.env, str(args.seed))
+images_dir  = os.path.join(results_dir, 'images')
+videos_dir  = os.path.join(results_dir, 'videos')
 os.makedirs(results_dir, exist_ok=True)
-os.makedirs('logs', exist_ok=True)
+os.makedirs(images_dir,  exist_ok=True)
+os.makedirs(videos_dir,  exist_ok=True)
 
 run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
 csv_path = os.path.join(results_dir, f'rewards_{run_id}.csv')
@@ -342,8 +340,10 @@ for episode in tqdm(
         )
         if not args.symbolic:
             episode_str = str(episode).zfill(len(str(args.episodes)))
-            write_video(video_frames, 'test_episode_%s' % episode_str, results_dir)
-            save_image(torch.as_tensor(video_frames[-1]), os.path.join(results_dir, 'test_episode_%s.png' % episode_str))
+            write_video(video_frames, 'ep_%s' % episode_str, videos_dir)
+            frame = torch.as_tensor(video_frames[-1])
+            save_image(frame, os.path.join(images_dir, 'ep_%s.png' % episode_str))
+            save_image(frame, os.path.join(images_dir, 'latest.png'))
         torch.save(metrics, os.path.join(results_dir, 'metrics.pth'))
 
         agent.transition_model.train()
@@ -356,7 +356,6 @@ for episode in tqdm(
     print('episodes: {}, total_steps: {}, train_reward: {}'.format(
         metrics['episodes'][-1], metrics['steps'][-1], metrics['train_rewards'][-1]
     ))
-    wandb.log({'episode': episode, 'cumulative_reward': total_reward})
 
     # --- Checkpoint ---
     if episode % args.checkpoint_interval == 0:

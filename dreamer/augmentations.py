@@ -164,8 +164,11 @@ class Augmenter:
         N, C, _, _ = x.shape
         ch = int(H * self.crop_frac)
         cw = int(W * self.crop_frac)
-        y0 = torch.randint(0, H - ch + 1, (1,)).item()
-        x0 = torch.randint(0, W - cw + 1, (1,)).item()
-        cropped = x[:, :, y0:y0 + ch, x0:x0 + cw]
+        # Independent crop offset per sample
+        y0s = torch.randint(0, H - ch + 1, (N,))
+        x0s = torch.randint(0, W - cw + 1, (N,))
+        out = torch.empty(N, C, ch, cw, dtype=x.dtype, device=x.device)
+        for i in range(N):
+            out[i] = x[i, :, y0s[i]:y0s[i] + ch, x0s[i]:x0s[i] + cw]
         # Resize back to original H×W
-        return F.interpolate(cropped, size=(H, W), mode='bilinear', align_corners=False)
+        return F.interpolate(out, size=(H, W), mode='bilinear', align_corners=False)

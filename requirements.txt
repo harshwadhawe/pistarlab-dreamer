@@ -1,5 +1,34 @@
-gym
-opencv-python
-plotly
+# donkeycar-dreamer — Python 3.11
+# Single env for sim training, real-world server training, and TFLite export.
+#
+# Install:
+#   conda create -n donkeycar-dreamer python=3.11 -y
+#   conda activate donkeycar-dreamer
+#   pip install -r requirements.txt
+#   pip install git+https://github.com/tawnkramer/gym-donkeycar.git
+
+# Core training
 torch
+torchvision
+numpy
 tqdm
+tensorboardX
+
+# Sim environment
+gym==0.26.2
+gymnasium
+# gym-donkeycar: install from source (see above) — not on PyPI at correct version
+
+# Visualisation / logging (CSV + plotly HTML — no wandb)
+plotly
+opencv-python
+
+# TFLite export (litert-torch 0.8.0 — same env, no separate litert env needed)
+litert-torch
+
+# Real-world car communication (server ↔ Pi5)
+pyzmq
+
+# Human override (sim keyboard control)
+pygame
+pynput
