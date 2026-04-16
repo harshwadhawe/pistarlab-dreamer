@@ -61,8 +61,8 @@ parser.add_argument('--symbolic',        action='store_true')
 
 # Training
 parser.add_argument('--episodes',          type=int,   default=500)
-parser.add_argument('--collect-interval',  type=int,   default=200,
-                    help='Gradient steps per training round (use 200-400 for real world)')
+parser.add_argument('--collect-interval',  type=int,   default=100,
+                    help='Gradient steps per training round (100 ≈ 3 min on MPS)')
 parser.add_argument('--batch-size',        type=int,   default=50)
 parser.add_argument('--chunk-size',        type=int,   default=50)
 parser.add_argument('--experience-size',   type=int,   default=1000000)
