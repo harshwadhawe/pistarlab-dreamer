@@ -1,17 +1,32 @@
 """
 PS4 controller override for Pi5 real-world driving.
-Uses the `inputs` library (Linux evdev, no root needed).
+Uses evdev — reads directly from /dev/input/event*, no root needed (input group required).
 
 Button mapping:
   ○ Circle   → STOP  (episode end, reward -1)
   × Cross    → RESET (clean lap end, reward 0)
   △ Triangle → QUIT  (end session)
   □ Square   → PAUSE (toggle zero throttle)
-
-Same consume_event() / should_quit interface as HumanOverride.
 """
 
 import threading
+import evdev
+from evdev import InputDevice, categorize, ecodes
+
+
+# Standard Linux gamepad button codes
+_BTN_CIRCLE   = 305   # ○
+_BTN_CROSS    = 304   # ×
+_BTN_TRIANGLE = 308   # △
+_BTN_SQUARE   = 307   # □
+
+
+def _find_controller():
+    for path in evdev.list_devices():
+        dev = InputDevice(path)
+        if 'Wireless Controller' in dev.name or 'DUALSHOCK' in dev.name.upper():
+            return dev
+    return None
 
 
 class PS4Override:
@@ -19,41 +34,54 @@ class PS4Override:
     RESET = 'reset'
     QUIT  = 'quit'
 
-    _BTN_MAP = {
-        ('BTN_EAST',  1): 'stop',   # ○ Circle
-        ('BTN_SOUTH', 1): 'reset',  # × Cross
-        ('BTN_NORTH', 1): 'quit',   # △ Triangle
-    }
-
     def __init__(self):
         self._event  = None
         self._paused = False
         self._lock   = threading.Lock()
         self._active = True
-        t = threading.Thread(target=self._poll_loop, daemon=True)
-        t.start()
-        print('[PS4] Listening — ○=STOP  ×=RESET  △=QUIT  □=PAUSE')
 
-    def _poll_loop(self):
-        from inputs import get_gamepad
-        while self._active:
-            try:
-                for ev in get_gamepad():
-                    key = (ev.code, ev.state)
-                    if key == ('BTN_WEST', 1):          # □ Square — toggle pause
-                        with self._lock:
-                            self._paused = not self._paused
-                        print(f'\r[PS4] {"PAUSED" if self._paused else "RESUMED"}   ')
-                    elif key in self._BTN_MAP:
-                        with self._lock:
-                            self._event = self._BTN_MAP[key]
-                        print(f'\r[PS4] {self._event.upper()}   ')
-            except Exception as e:
-                print(f'[PS4] Controller error: {e}')
-                break
+        dev = _find_controller()
+        if dev is None:
+            raise RuntimeError(
+                'PS4 controller not found. '
+                'Check it is paired and user is in the input group.'
+            )
+        print(f'[PS4] Found: {dev.name} ({dev.path})')
+        print('[PS4] ○=STOP  ×=RESET  △=QUIT  □=PAUSE')
+
+        t = threading.Thread(target=self._poll_loop, args=(dev,), daemon=True)
+        t.start()
+
+    def _poll_loop(self, dev):
+        try:
+            for event in dev.read_loop():
+                if not self._active:
+                    break
+                if event.type != ecodes.EV_KEY:
+                    continue
+                key = categorize(event)
+                if key.keystate != 1:   # only press, not release
+                    continue
+                if key.scancode == _BTN_SQUARE:
+                    with self._lock:
+                        self._paused = not self._paused
+                    print(f'\r[PS4] {"PAUSED" if self._paused else "RESUMED"}   ')
+                elif key.scancode == _BTN_CIRCLE:
+                    with self._lock:
+                        self._event = self.STOP
+                    print('\r[PS4] STOP   ')
+                elif key.scancode == _BTN_CROSS:
+                    with self._lock:
+                        self._event = self.RESET
+                    print('\r[PS4] RESET  ')
+                elif key.scancode == _BTN_TRIANGLE:
+                    with self._lock:
+                        self._event = self.QUIT
+                    print('\r[PS4] QUIT   ')
+        except Exception as e:
+            print(f'[PS4] Error: {e}')
 
     def consume_event(self):
-        """Return and clear the current event, or None."""
         with self._lock:
             ev, self._event = self._event, None
         return ev
