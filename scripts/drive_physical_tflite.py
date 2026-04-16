@@ -29,8 +29,13 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 import time
+
+# Ensure repo root is on path when running as scripts/drive_physical_tflite.py
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+
 import warnings
 import numpy as np
 import cv2
