@@ -30,7 +30,6 @@ import csv
 import os
 import subprocess
 import sys
-import threading
 from datetime import datetime
 
 import numpy as np
@@ -185,50 +184,40 @@ publisher = ModelPublisher(bind_ip=args.bind_ip)
 # ---------------------------------------------------------------------------
 # TFLite export (runs in litert conda env to avoid conflicts)
 # ---------------------------------------------------------------------------
-_export_lock = threading.Lock()
-
-
 def export_and_publish(episode_count: int) -> None:
-    """Export TFLite in background thread, publish when done."""
+    """Export TFLite synchronously (blocking) then publish. Car is halted
+    waiting for this — running inline ensures training always finishes
+    before the car receives new weights."""
+    tflite_path = os.path.join(args.results_dir, f'inference_{episode_count}.tflite')
+    ckpt_path   = os.path.join(args.results_dir, f'export_weights_{episode_count}.pth')
 
-    def _run():
-        with _export_lock:
-            tflite_path = os.path.join(
-                args.results_dir, f'inference_{episode_count}.tflite'
-            )
-            ckpt_path = os.path.join(
-                args.results_dir, f'export_weights_{episode_count}.pth'
-            )
-            # Save inference weights (encoder + transition + actor only)
-            torch.save({
-                'encoder':          agent.encoder.cpu().state_dict(),
-                'transition_model': agent.transition_model.cpu().state_dict(),
-                'actor_model':      agent.actor_model.cpu().state_dict(),
-            }, ckpt_path)
-            agent.encoder.to(args.device)
-            agent.transition_model.to(args.device)
-            agent.actor_model.to(args.device)
+    torch.save({
+        'encoder':          agent.encoder.cpu().state_dict(),
+        'transition_model': agent.transition_model.cpu().state_dict(),
+        'actor_model':      agent.actor_model.cpu().state_dict(),
+    }, ckpt_path)
+    agent.encoder.to(args.device)
+    agent.transition_model.to(args.device)
+    agent.actor_model.to(args.device)
 
-            cmd = [
-                sys.executable, 'scripts/export_pth_to_tflite.py', ckpt_path,
-                '--output', tflite_path,
-                '--channels', str(args.channels),
-                '--belief-size', str(args.belief_size),
-                '--state-size', str(args.state_size),
-                '--action-size', str(args.action_size),
-                '--embedding-size', str(args.embedding_size),
-                '--hidden-size', str(args.hidden_size),
-                '--throttle-base', str(args.throttle_base),
-            ]
-            print(f'[Server] Exporting TFLite (episode {episode_count})...')
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f'[Server] Export FAILED:\n{result.stderr}')
-                return
-            print(result.stdout.strip())
-            publisher.publish(tflite_path, step=agent.D.steps)
-
-    threading.Thread(target=_run, daemon=True).start()
+    cmd = [
+        sys.executable, 'scripts/export_pth_to_tflite.py', ckpt_path,
+        '--output', tflite_path,
+        '--channels',       str(args.channels),
+        '--belief-size',    str(args.belief_size),
+        '--state-size',     str(args.state_size),
+        '--action-size',    str(args.action_size),
+        '--embedding-size', str(args.embedding_size),
+        '--hidden-size',    str(args.hidden_size),
+        '--throttle-base',  str(args.throttle_base),
+    ]
+    print(f'[Server] Exporting TFLite (episode {episode_count})...')
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f'[Server] Export FAILED:\n{result.stderr}')
+        return
+    print(result.stdout.strip())
+    publisher.publish(tflite_path, step=agent.D.steps)
 
 
 # ---------------------------------------------------------------------------
