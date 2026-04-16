@@ -305,9 +305,9 @@ while episode_count < args.episodes:
     ])
     csv_file.flush()
 
-    # Always push — car blocks waiting for this to unblock before next episode.
+    # Only export post-seed (car halts waiting for this; seed episodes skip halt).
     # Background thread so training loop isn't delayed by export subprocess.
-    if episode_count % args.push_interval == 0:
+    if episode_count > args.seed_episodes and episode_count % args.push_interval == 0:
         export_and_publish(episode_count)
 
     if episode_count % args.checkpoint_interval == 0:
