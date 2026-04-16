@@ -204,11 +204,12 @@ class Dreamer:
         # Return normalisation (Dreamer v3): scale by running 5th/95th percentile range
         if self.args.return_norm:
             with torch.no_grad():
-                p5  = torch.quantile(returns, 0.05).item()
-                p95 = torch.quantile(returns, 0.95).item()
+                p5  = torch.quantile(returns, 0.05)
+                p95 = torch.quantile(returns, 0.95)
+            # Keep EMA on device — no .item() sync
             self._ret_ema_low  = 0.99 * self._ret_ema_low  + 0.01 * p5
             self._ret_ema_high = 0.99 * self._ret_ema_high + 0.01 * p95
-            S = max(1.0, self._ret_ema_high - self._ret_ema_low)
+            S = torch.clamp(self._ret_ema_high - self._ret_ema_low, min=1.0)
             returns = returns / S
 
         discount = torch.cumprod(torch.cat([torch.ones_like(pcont[:1]), pcont[:-2]], 0), 0).detach()
@@ -358,9 +359,9 @@ class Dreamer:
             self.value_optimizer.step()
 
             loss_info.append([
-                observation_loss.item(), reward_loss.item(), kl_loss.item(),
-                pcont_loss.item() if self.args.pcont else 0,
-                actor_loss.item(), critic_loss.item(),
+                observation_loss.detach(), reward_loss.detach(), kl_loss.detach(),
+                pcont_loss.detach() if self.args.pcont else torch.zeros(1, device=self.args.device),
+                actor_loss.detach(), critic_loss.detach(),
             ])
 
         # Polyak (soft) update target value networks
@@ -375,7 +376,8 @@ class Dreamer:
             ):
                 p_target.data.mul_(1 - self.args.polyak).add_(self.args.polyak * p_online.data)
 
-        return loss_info
+        # Convert to float after the loop — avoids per-step MPS sync from .item()
+        return [[x.item() if hasattr(x, 'item') else x for x in row] for row in loss_info]
 
     # ------------------------------------------------------------------
     # Inference / action selection
