@@ -24,7 +24,9 @@ _BTN_SQUARE   = 307   # □
 def _find_controller():
     for path in evdev.list_devices():
         dev = InputDevice(path)
-        if 'Wireless Controller' in dev.name or 'DUALSHOCK' in dev.name.upper():
+        # Match main controller only — not Touchpad or Motion Sensors
+        if dev.name in ('Wireless Controller', 'DualSense Wireless Controller') \
+                or dev.name.upper() == 'DUALSHOCK 4 WIRELESS CONTROLLER':
             return dev
     return None
 
