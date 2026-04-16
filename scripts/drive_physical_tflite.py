@@ -299,7 +299,7 @@ class PhysicalDreamerCar:
             # Halt until server pushes a new model (blocks during training).
             # During seed episodes: skip halt so car runs freely like sim.
             # Keeps motors zeroed. Noop when running standalone.
-            if self.args.server_ip and episode_num >= self.args.seed_episodes:
+            if self.args.server_ip and episode_num > self.args.seed_episodes:
                 print('[Car] HALTED — waiting for new model from server...')
                 while True:
                     self.send_zero()
