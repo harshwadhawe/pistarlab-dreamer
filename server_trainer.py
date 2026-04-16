@@ -93,7 +93,8 @@ parser.add_argument('--throttle_min',      type=float, default=0.1)
 parser.add_argument('--throttle_max',      type=float, default=0.5)
 parser.add_argument('--angle_min',         type=float, default=-1.0)
 parser.add_argument('--angle_max',         type=float, default=1.0)
-parser.add_argument('--grayscale',         action='store_true', default=False)
+parser.add_argument('--grayscale',         action='store_true', default=True,
+                    help='1-channel grayscale — must match car drive script --channels')
 parser.add_argument('--observation_size',  default=None)
 parser.add_argument('--augment',           action='store_true', default=True,
                     help='Sim-to-real augmentations during world model training')
