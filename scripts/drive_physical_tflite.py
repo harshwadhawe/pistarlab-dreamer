@@ -213,6 +213,7 @@ class PhysicalDreamerCar:
     def run(self):
         print('='*52)
         print('  AUTONOMOUS MODE')
+        print('  R1         → START next episode')
         print('  ○ Circle   → STOP  (off-track, reward -1)')
         print('  × Cross    → RESET (clean lap,  reward  0)')
         print('  △ Triangle → QUIT  (end session)')
@@ -292,6 +293,19 @@ class PhysicalDreamerCar:
                 print(f'[Car] Episode {episode_num} sent to server.')
 
             episode_num += 1
+
+            if self.ps4.should_quit:
+                break
+
+            # Wait for R1 before starting next episode
+            print('[Car] Press R1 to start next episode | △ to quit...')
+            while True:
+                ev = self.ps4.consume_event()
+                if ev == self.ps4.START:
+                    break
+                if ev == self.ps4.QUIT or self.ps4.should_quit:
+                    break
+                time.sleep(0.05)
 
         self.ps4.stop()
         self.shutdown()

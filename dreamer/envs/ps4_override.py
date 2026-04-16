@@ -19,6 +19,7 @@ _BTN_CIRCLE   = 305   # ○
 _BTN_CROSS    = 304   # ×
 _BTN_TRIANGLE = 308   # △
 _BTN_SQUARE   = 307   # □
+_BTN_R1       = 311   # R1 → start next episode
 
 
 def _find_controller():
@@ -35,6 +36,7 @@ class PS4Override:
     STOP  = 'stop'
     RESET = 'reset'
     QUIT  = 'quit'
+    START = 'start'
 
     def __init__(self):
         self._event  = None
@@ -80,6 +82,10 @@ class PS4Override:
                     with self._lock:
                         self._event = self.QUIT
                     print('\r[PS4] QUIT   ')
+                elif key.scancode == _BTN_R1:
+                    with self._lock:
+                        self._event = self.START
+                    print('\r[PS4] START  ')
         except Exception as e:
             print(f'[PS4] Error: {e}')
 
