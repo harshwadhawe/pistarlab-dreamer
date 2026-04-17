@@ -277,8 +277,19 @@ def save_reconstruction(episode_count: int) -> None:
     agent.encoder.train()
 
     ep_str = str(episode_count).zfill(len(str(args.episodes)))
-    save_image(grid, os.path.join(images_dir, f'ep_{ep_str}.png'))
+    ep_path = os.path.join(images_dir, f'ep_{ep_str}.png')
+    save_image(grid, ep_path)
     save_image(grid, os.path.join(images_dir, 'latest.png'))
+
+    # Keep only 5 random episode images (plus latest.png)
+    imgs = sorted(f for f in os.listdir(images_dir)
+                  if f.startswith('ep_') and f.endswith('.png'))
+    if len(imgs) > 5:
+        keep = set(np.random.choice(imgs, 5, replace=False))
+        for f in imgs:
+            if f not in keep:
+                os.remove(os.path.join(images_dir, f))
+
     print(f'[Server] Reconstruction image saved → images/ep_{ep_str}.png')
 
 
