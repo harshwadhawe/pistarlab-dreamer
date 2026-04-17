@@ -1,3 +1,4 @@
+import collections
 import cv2
 import numpy as np
 import torch
@@ -223,7 +224,7 @@ class DonkeyCarEnv:
 
     def __init__(self, env, symbolic, seed, max_episode_length, action_repeat, bit_depth,
                  sim_path, host='127.0.0.1', port=9091, use_visual_reward=False,
-                 human_override=None, smooth_weight=0.0, channels=1):
+                 human_override=None, smooth_weight=0.0, smooth_window=10, channels=1):
         import gymnasium as gym
         import gym_donkeycar  # registers envs with gymnasium
         self.symbolic = symbolic
@@ -247,7 +248,8 @@ class DonkeyCarEnv:
         self._episode_steps  = 0
         self._episode_num    = 0
         self.smooth_weight   = smooth_weight
-        self._prev_steer     = 0.0
+        self.smooth_window   = smooth_window
+        self._steer_buf      = collections.deque(maxlen=smooth_window)
         self._channels       = channels
 
     def reset(self):
@@ -257,7 +259,7 @@ class DonkeyCarEnv:
         self._episode_reward = 0.0
         self._episode_steps  = 0
         self._episode_num   += 1
-        self._prev_steer     = 0.0
+        self._steer_buf.clear()
         # Pass seed only on the very first reset so subsequent episodes
         # use the env's internal seeded RNG rather than resetting to the same state.
         if self._first_reset:
@@ -324,11 +326,11 @@ class DonkeyCarEnv:
                 if self._stuck_steps >= self.STUCK_STEPS_LIMIT:
                     terminated = True
 
-            # Action smoothness penalty — no sensor needed, uses steering output only
-            if self.smooth_weight > 0.0 and not terminated:
-                steer_diff = abs(float(action[0]) - self._prev_steer)
-                reward_k -= self.smooth_weight * steer_diff
-            self._prev_steer = float(action[0])
+            # Steering jitter penalty: std dev over rolling window penalises
+            # sustained oscillation more than a single abrupt step change.
+            self._steer_buf.append(float(action[0]))
+            if self.smooth_weight > 0.0 and not terminated and len(self._steer_buf) >= 2:
+                reward_k -= self.smooth_weight * float(np.std(self._steer_buf))
 
             reward += reward_k
             self.t += 1
@@ -370,7 +372,7 @@ class DonkeyCarEnv:
 
 
 def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth, sim_path, host, port,
-        use_visual_reward=False, human_override=None, smooth_weight=0.0, channels=1):
+        use_visual_reward=False, human_override=None, smooth_weight=0.0, smooth_window=10, channels=1):
     if env in GYM_ENVS:
         return GymEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth)
     elif env in CONTROL_SUITE_ENVS:
@@ -379,7 +381,7 @@ def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth, sim_p
         return DonkeyCarEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth,
                             sim_path, host, port, use_visual_reward=use_visual_reward,
                             human_override=human_override, smooth_weight=smooth_weight,
-                            channels=channels)
+                            smooth_window=smooth_window, channels=channels)
     else:
         raise NotImplementedError(f'Unknown environment: {env}')
 

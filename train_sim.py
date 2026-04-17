@@ -6,7 +6,7 @@ from datetime import datetime
 
 import numpy as np
 import torch
-from torchvision.utils import make_grid, save_image
+from torchvision.utils import make_grid
 from tqdm import tqdm
 
 from dreamer.config import add_common_args
@@ -38,8 +38,10 @@ parser.add_argument('--human_override', action='store_true', default=False,
                     help='Human override: operator presses = to stop (off-track) '
                          'or R to reset (clean lap). Removes all dependence on CTE telemetry.')
 parser.add_argument('--smooth_weight', type=float, default=0.05,
-                    help='Penalty weight for steering jerk: reward -= smooth_weight * |steer_t - steer_{t-1}|. '
+                    help='Penalty weight for steering jitter: reward -= smooth_weight * std(steer_window). '
                          'No sensor needed. Set 0 to disable.')
+parser.add_argument('--smooth_window', type=int, default=10,
+                    help='Rolling window size (steps) for steering std dev penalty.')
 
 # Evaluation & checkpointing
 parser.add_argument('--test', action='store_true')
@@ -106,7 +108,7 @@ env = Env(args.env, args.symbolic, args.seed, args.max_episode_length,
           args.action_repeat, args.bit_depth, sim_path=args.sim_path,
           host=args.host, port=args.port, use_visual_reward=args.use_visual_reward,
           human_override=human_override, smooth_weight=args.smooth_weight,
-          channels=args.channels)
+          smooth_window=args.smooth_window, channels=args.channels)
 agent = Dreamer(args)
 
 # ---------------------------------------------------------------------------
@@ -262,9 +264,7 @@ for episode in tqdm(
         if not args.symbolic:
             episode_str = str(episode).zfill(len(str(args.episodes)))
             write_video(video_frames, 'ep_%s' % episode_str, videos_dir)
-            frame = torch.as_tensor(video_frames[-1])
-            save_image(frame, os.path.join(images_dir, 'ep_%s.png' % episode_str))
-            save_image(frame, os.path.join(images_dir, 'latest.png'))
+            agent.save_reconstruction(images_dir, episode, args.episodes)
         torch.save(metrics, os.path.join(results_dir, 'metrics.pth'))
 
         agent.set_train_mode()
