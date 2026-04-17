@@ -282,8 +282,7 @@ def save_reconstruction(episode_count: int) -> None:
     save_image(grid, os.path.join(images_dir, 'latest.png'))
 
     # Keep only 5 random episode images (plus latest.png)
-    imgs = sorted(f for f in os.listdir(images_dir)
-                  if f.startswith('ep_') and f.endswith('.png'))
+    imgs = [f for f in os.listdir(images_dir) if f.startswith('ep_') and f.endswith('.png')]
     if len(imgs) > 5:
         keep = set(np.random.choice(imgs, 5, replace=False))
         for f in imgs:
