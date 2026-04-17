@@ -266,6 +266,9 @@ class PhysicalDreamerCar:
                 else:
                     reward, done =  1.0, False
 
+                if len(rew_buf) >= self.args.max_episode_steps:
+                    reward, done = 1.0, True   # clean timeout — full reward
+
                 obs_buf.append(obs.copy())
                 act_buf.append(action.copy())
                 rew_buf.append(reward)
@@ -362,6 +365,8 @@ if __name__ == '__main__':
     parser.add_argument('--channels',      type=int,  default=1,   help='1=grayscale 3=RGB')
     parser.add_argument('--belief-size',   type=int,  default=200)
     parser.add_argument('--state-size',    type=int,  default=30)
+    parser.add_argument('--max-episode-steps', type=int, default=500,
+                        help='Auto-end episode after this many steps (default 500 ≈ 8s)')
     parser.add_argument('--seed-episodes', type=int,  default=5,
                         help='Run this many episodes freely before halting for model updates')
     args = parser.parse_args()
