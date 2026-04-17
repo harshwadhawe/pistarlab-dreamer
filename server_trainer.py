@@ -39,6 +39,7 @@ from torchvision.utils import make_grid, save_image
 
 from dreamer.agent import Dreamer
 from dreamer.comms import ExperienceReceiver, ModelPublisher
+from dreamer.utils.math_utils import bottle
 
 # ---------------------------------------------------------------------------
 # Args — same architecture defaults as train.py for checkpoint compatibility
@@ -251,7 +252,6 @@ def save_checkpoint(episode_count: int) -> None:
 
 def save_reconstruction(episode_count: int) -> None:
     """Save a grid of real vs reconstructed observations to images/."""
-    from dreamer.models.world_model import bottle
     n_show = 8   # sequences to display side-by-side
     agent.transition_model.eval()
     agent.observation_model.eval()
