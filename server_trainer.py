@@ -34,96 +34,41 @@ from datetime import datetime
 
 import numpy as np
 import torch
-from torch.nn import functional as F
 from torchvision.utils import make_grid, save_image
 
+from dreamer.config import add_common_args
 from dreamer.agent import Dreamer
 from dreamer.comms import ExperienceReceiver, ModelPublisher
+from dreamer.utils import setup_device
 from dreamer.utils.math_utils import bottle
 
 # ---------------------------------------------------------------------------
-# Args — same architecture defaults as train.py for checkpoint compatibility
+# Args — shared defaults + server-specific additions
 # ---------------------------------------------------------------------------
 parser = argparse.ArgumentParser(description='Dreamer — real-world server trainer')
 
-# Architecture (must match the checkpoint you load)
-parser.add_argument('--embedding-size',  type=int,   default=1024)
-parser.add_argument('--hidden-size',     type=int,   default=300)
-parser.add_argument('--belief-size',     type=int,   default=200)
-parser.add_argument('--state-size',      type=int,   default=30)
-parser.add_argument('--action_size',     type=int,   default=2)
-parser.add_argument('--cnn-act',         type=str,   default='relu', choices=dir(F))
-parser.add_argument('--dense-act',       type=str,   default='elu',  choices=dir(F))
-parser.add_argument('--free-nats',       type=float, default=1.0)
-parser.add_argument('--bit-depth',       type=int,   default=8)
-parser.add_argument('--reward_scale',    type=int,   default=10)
-parser.add_argument('--pcont',           action='store_true')
-parser.add_argument('--pcont_scale',     type=int,   default=10)
-parser.add_argument('--symbolic',        action='store_true')
+add_common_args(parser)
 
-# Training
-parser.add_argument('--episodes',          type=int,   default=500)
-parser.add_argument('--collect-interval',  type=int,   default=100,
-                    help='Gradient steps per training round (100 ≈ 3 min on MPS)')
-parser.add_argument('--batch-size',        type=int,   default=50)
-parser.add_argument('--chunk-size',        type=int,   default=50)
-parser.add_argument('--experience-size',   type=int,   default=1000000)
-parser.add_argument('--world_lr',          type=float, default=6e-4)
-parser.add_argument('--actor_lr',          type=float, default=8e-5)
-parser.add_argument('--value_lr',          type=float, default=8e-5)
-parser.add_argument('--grad-clip-norm',    type=float, default=100.0)
-
-# Policy
-parser.add_argument('--planning-horizon',  type=int,   default=15)
-parser.add_argument('--discount',          type=float, default=0.99)
-parser.add_argument('--disclam',           type=float, default=0.95)
-parser.add_argument('--polyak',            type=float, default=0.005)
-parser.add_argument('--expl_amount',       type=float, default=0.0,
-                    help='TFLite runs deterministic; keep at 0 for real world')
-parser.add_argument('--with_logprob',      action='store_true')
-parser.add_argument('--auto_temp',         action='store_true')
-parser.add_argument('--temp',              type=float, default=0.003)
-parser.add_argument('--kl_balance',        action=argparse.BooleanOptionalAction, default=True)
-parser.add_argument('--symlog_rewards',    action=argparse.BooleanOptionalAction, default=True)
-parser.add_argument('--return_norm',       action=argparse.BooleanOptionalAction, default=True)
-
-# DonkeyCar action
-parser.add_argument('--fix_speed',         action='store_true', default=True)
-parser.add_argument('--throttle_base',     type=float, default=0.3)
-parser.add_argument('--throttle_min',      type=float, default=0.1)
-parser.add_argument('--throttle_max',      type=float, default=0.5)
-parser.add_argument('--angle_min',         type=float, default=-1.0)
-parser.add_argument('--angle_max',         type=float, default=1.0)
-parser.add_argument('--grayscale',         action='store_true', default=True,
-                    help='1-channel grayscale — must match car drive script --channels')
-parser.add_argument('--observation_size',  default=None)
-parser.add_argument('--augment',           action='store_true', default=True,
-                    help='Sim-to-real augmentations during world model training')
+# Override defaults that differ for real-world server
+parser.set_defaults(
+    episodes=500,
+    grayscale=True,       # must match car drive script --channels
+    augment=True,         # sim-to-real augmentations on by default for real world
+    expl_amount=0.0,      # TFLite runs deterministic
+)
 
 # Server-specific
-parser.add_argument('--bind_ip',           type=str,   default='*',
+parser.add_argument('--bind_ip',           type=str, default='*',
                     help='IP to bind ZMQ sockets (default: all interfaces)')
-parser.add_argument('--seed-episodes',     type=int,   default=5,
-                    help='Collect this many episodes before training starts (mirrors sim)')
-parser.add_argument('--push_interval',     type=int,   default=1,
-                    help='Export + push TFLite to car every N episodes (default 1 — every episode)')
+parser.add_argument('--push_interval',     type=int, default=1,
+                    help='Export + push TFLite to car every N episodes')
 parser.add_argument('--checkpoint_interval', type=int, default=50,
                     help='Save .pth checkpoint every N episodes')
-
-# Paths / init
-parser.add_argument('--models',            type=str,   default='',
-                    help='Path to .pth checkpoint to bootstrap from (sim or prior real run)')
-parser.add_argument('--experience-replay', type=str,   default='',
-                    help='Path to saved replay buffer to resume from')
-parser.add_argument('--results-dir',       type=str,   default='results/real')
-parser.add_argument('--seed',              type=int,   default=42)
-parser.add_argument('--disable-cuda',      action='store_true')
+parser.add_argument('--results-dir',       type=str, default='results/real')
 
 args = parser.parse_args()
 args.channels = 1 if args.grayscale else 3
 args.observation_size = (args.channels, 64, 64)
-args.adam_epsilon = 1e-7
-args.learning_rate_schedule = 0
 args.smooth_weight = 0.0
 
 # ---------------------------------------------------------------------------
@@ -136,17 +81,7 @@ os.makedirs(images_dir, exist_ok=True)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
-if torch.cuda.is_available() and not args.disable_cuda:
-    args.device = torch.device('cuda')
-    torch.cuda.manual_seed_all(args.seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-elif torch.backends.mps.is_available() and not args.disable_cuda:
-    args.device = torch.device('mps')
-    torch.mps.manual_seed(args.seed)
-else:
-    args.device = torch.device('cpu')
-
+setup_device(args)
 print(f'[Server] Device: {args.device}')
 
 run_id   = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -169,14 +104,7 @@ if args.experience_replay and os.path.exists(args.experience_replay):
           f'{agent.D.episodes} episodes')
 
 if args.models and os.path.exists(args.models):
-    ckpt = torch.load(args.models, map_location=args.device)
-    agent.transition_model.load_state_dict(ckpt['transition_model'])
-    agent.observation_model.load_state_dict(ckpt['observation_model'])
-    agent.reward_model.load_state_dict(ckpt['reward_model'])
-    agent.encoder.load_state_dict(ckpt['encoder'])
-    agent.actor_model.load_state_dict(ckpt['actor_model'])
-    agent.value_model.load_state_dict(ckpt['value_model'])
-    agent.value_model2.load_state_dict(ckpt['value_model2'])
+    agent.load_checkpoint(args.models)
     print(f'[Server] Bootstrapped from sim checkpoint: {args.models}')
 
 # ---------------------------------------------------------------------------
@@ -230,18 +158,7 @@ def export_and_publish(episode_count: int) -> None:
 
 def save_checkpoint(episode_count: int) -> None:
     path = os.path.join(args.results_dir, f'models_{episode_count}.pth')
-    torch.save({
-        'transition_model':  agent.transition_model.state_dict(),
-        'observation_model': agent.observation_model.state_dict(),
-        'reward_model':      agent.reward_model.state_dict(),
-        'encoder':           agent.encoder.state_dict(),
-        'actor_model':       agent.actor_model.state_dict(),
-        'value_model':       agent.value_model.state_dict(),
-        'value_model2':      agent.value_model2.state_dict(),
-        'world_optimizer':   agent.world_optimizer.state_dict(),
-        'actor_optimizer':   agent.actor_optimizer.state_dict(),
-        'value_optimizer':   agent.value_optimizer.state_dict(),
-    }, path)
+    agent.save_checkpoint(path)
     torch.save(agent.D, os.path.join(args.results_dir, 'experience.pth'))
     print(f'[Server] Checkpoint saved → {path}')
 

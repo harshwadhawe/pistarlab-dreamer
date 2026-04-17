@@ -413,6 +413,40 @@ class Dreamer:
     # Distributed rollout helpers
     # ------------------------------------------------------------------
 
+    def set_train_mode(self):
+        for m in (self.transition_model, self.observation_model, self.reward_model,
+                  self.encoder, self.actor_model, self.value_model):
+            m.train()
+
+    def set_eval_mode(self):
+        for m in (self.transition_model, self.observation_model, self.reward_model,
+                  self.encoder, self.actor_model, self.value_model):
+            m.eval()
+
+    def save_checkpoint(self, path: str) -> None:
+        torch.save({
+            'transition_model':  self.transition_model.state_dict(),
+            'observation_model': self.observation_model.state_dict(),
+            'reward_model':      self.reward_model.state_dict(),
+            'encoder':           self.encoder.state_dict(),
+            'actor_model':       self.actor_model.state_dict(),
+            'value_model':       self.value_model.state_dict(),
+            'value_model2':      self.value_model2.state_dict(),
+            'world_optimizer':   self.world_optimizer.state_dict(),
+            'actor_optimizer':   self.actor_optimizer.state_dict(),
+            'value_optimizer':   self.value_optimizer.state_dict(),
+        }, path)
+
+    def load_checkpoint(self, path: str) -> None:
+        ckpt = torch.load(path, map_location=self.args.device)
+        self.transition_model.load_state_dict(ckpt['transition_model'])
+        self.observation_model.load_state_dict(ckpt['observation_model'])
+        self.reward_model.load_state_dict(ckpt['reward_model'])
+        self.encoder.load_state_dict(ckpt['encoder'])
+        self.actor_model.load_state_dict(ckpt['actor_model'])
+        self.value_model.load_state_dict(ckpt['value_model'])
+        self.value_model2.load_state_dict(ckpt['value_model2'])
+
     def import_parameters(self, params):
         self.encoder.load_state_dict(params['encoder'])
         self.actor_model.load_state_dict(params['policy'])
