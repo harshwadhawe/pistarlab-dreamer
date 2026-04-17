@@ -300,15 +300,30 @@ class PhysicalDreamerCar:
             # During seed episodes: skip halt so car runs freely like sim.
             # Keeps motors zeroed. Noop when running standalone.
             if self.args.server_ip and episode_num > self.args.seed_episodes:
-                print('[Car] HALTED — waiting for new model from server...')
+                t_halt = time.time()
+                spinner = ['|', '/', '-', '\\']
+                spin_i  = 0
                 while True:
                     self.send_zero()
                     update = self.model_sub.poll()
+                    elapsed = time.time() - t_halt
+                    print(
+                        f'\r[Car] HALTED {spinner[spin_i % 4]} '
+                        f'waiting for model... {elapsed:5.1f}s',
+                        end='', flush=True,
+                    )
+                    spin_i += 1
                     if update:
+                        kb = len(update['model_bytes']) / 1024
+                        print(
+                            f'\r[Car] Model received ({kb:.0f} KB, '
+                            f'server step {update["step"]}, '
+                            f'waited {elapsed:.1f}s) — resuming.      '
+                        )
                         self.model.reload(update['model_bytes'])
-                        print(f'[Car] New model arrived (server step {update["step"]}) — resuming.')
                         break
                     if self.ps4.should_quit:
+                        print()
                         break
                     time.sleep(0.05)
 

@@ -35,6 +35,7 @@ from datetime import datetime
 import numpy as np
 import torch
 from torch.nn import functional as F
+from torchvision.utils import make_grid, save_image
 
 from dreamer.agent import Dreamer
 from dreamer.comms import ExperienceReceiver, ModelPublisher
@@ -128,6 +129,8 @@ args.smooth_weight = 0.0
 # Setup
 # ---------------------------------------------------------------------------
 os.makedirs(args.results_dir, exist_ok=True)
+images_dir = os.path.join(args.results_dir, 'images')
+os.makedirs(images_dir, exist_ok=True)
 
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
@@ -243,6 +246,43 @@ def save_checkpoint(episode_count: int) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Reconstruction image saver
+# ---------------------------------------------------------------------------
+
+def save_reconstruction(episode_count: int) -> None:
+    """Save a grid of real vs reconstructed observations to images/."""
+    from dreamer.models.world_model import bottle
+    n_show = 8   # sequences to display side-by-side
+    agent.transition_model.eval()
+    agent.observation_model.eval()
+    agent.encoder.eval()
+    with torch.no_grad():
+        obs, actions, _, nonterminals = agent.D.sample(n_show, args.chunk_size)
+        # obs: [T, B, C, H, W]
+        init_b = torch.zeros(n_show, args.belief_size,  device=args.device)
+        init_s = torch.zeros(n_show, args.state_size,   device=args.device)
+        beliefs, _, _, _, post_states, _, _ = agent.transition_model(
+            init_s, actions[:-1], init_b,
+            bottle(agent.encoder, (obs[1:],)),
+            nonterminals[:-1],
+        )
+        recon = bottle(agent.observation_model, (beliefs, post_states))
+        # Row 1: real observations; Row 2: reconstructions (both clipped to [0,1])
+        real  = (obs[1:].reshape(-1, *obs.shape[2:]) + 0.5).clamp(0, 1)
+        pred  = (recon.reshape(-1, *recon.shape[2:]) + 0.5).clamp(0, 1)
+        # Interleave real/pred pairs, show first chunk_size-1 steps × n_show
+        grid  = make_grid(torch.cat([real, pred], dim=0), nrow=n_show)
+    agent.transition_model.train()
+    agent.observation_model.train()
+    agent.encoder.train()
+
+    ep_str = str(episode_count).zfill(len(str(args.episodes)))
+    save_image(grid, os.path.join(images_dir, f'ep_{ep_str}.png'))
+    save_image(grid, os.path.join(images_dir, 'latest.png'))
+    print(f'[Server] Reconstruction image saved → images/ep_{ep_str}.png')
+
+
+# ---------------------------------------------------------------------------
 # Main training loop
 # ---------------------------------------------------------------------------
 print(f'\n[Server] Waiting for episodes from car. '
@@ -295,9 +335,9 @@ while episode_count < args.episodes:
     ])
     csv_file.flush()
 
-    # Only export post-seed (car halts waiting for this; seed episodes skip halt).
-    # Background thread so training loop isn't delayed by export subprocess.
+    # Only export + save images post-seed (car halts waiting for model push).
     if episode_count > args.seed_episodes and episode_count % args.push_interval == 0:
+        save_reconstruction(episode_count)
         export_and_publish(episode_count)
 
     if episode_count % args.checkpoint_interval == 0:
