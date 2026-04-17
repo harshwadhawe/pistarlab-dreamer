@@ -245,6 +245,13 @@ class PhysicalDreamerCar:
                 frame  = self.camera.run()
                 obs    = self.preprocess(frame)
                 action = self.model.step(obs)
+
+                # Seed episodes: override steering with uniform random [-1, 1]
+                # so the buffer gets diverse coverage instead of near-zero steer.
+                if episode_num < self.args.seed_episodes:
+                    action = action.copy()
+                    action[0] = float(np.random.uniform(-1.0, 1.0))
+
                 s, t   = self.send_action(float(action[0]), float(action[1]))
 
                 ev     = self.ps4.consume_event()
