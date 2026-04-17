@@ -33,7 +33,8 @@ class ExperienceReplay:
 
     def restore(self, snap):
         """Roll back to a previous snapshot, discarding appended entries."""
-        self.idx, self.steps, self.episodes, self.full = snap
+        self.idx, self.steps, self.episodes, _ = snap
+        self.full = self.steps >= self.size
 
     def append(self, observation, action, reward, done):
         self.observations[self.idx] = observation.numpy()

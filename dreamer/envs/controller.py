@@ -20,6 +20,7 @@ event_to_outcome reward table:
   None    → +1.0  (no event, survived step)
 """
 
+import queue
 import threading
 
 
@@ -30,18 +31,18 @@ class EpisodeController:
     START   = 'start'
 
     def __init__(self, backend):
-        self._event   = None
-        self._lock    = threading.Lock()
+        self._queue   = queue.Queue(maxsize=10)
         self._backend = backend
         backend._attach(self)
 
     # --- Public API (same for both backends) ---
 
     def consume_event(self):
-        """Return and clear the pending event, or None if none."""
-        with self._lock:
-            ev, self._event = self._event, None
-        return ev
+        """Return and remove the oldest pending event, or None if none."""
+        try:
+            return self._queue.get_nowait()
+        except queue.Empty:
+            return None
 
     @staticmethod
     def event_to_outcome(ev):
@@ -64,8 +65,10 @@ class EpisodeController:
     # --- Internal: called only by backends ---
 
     def _push(self, event):
-        with self._lock:
-            self._event = event
+        try:
+            self._queue.put_nowait(event)
+        except queue.Full:
+            pass  # drop oldest implicitly — maxsize prevents unbounded growth
 
     # --- Factories ---
 

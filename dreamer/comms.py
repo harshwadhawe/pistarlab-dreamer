@@ -6,11 +6,21 @@ Server side:    same classes, just different socket roles.
 
 Ports:
   5555 — experience  (Car PUSH  → Server PULL)
-  5556 — model       (Server PUB → Car SUB)
+  5556 — model       (Server PUSH → Car PULL, CONFLATE=1 keeps only latest)
 
 After each episode the car halts (zero throttle) and blocks on port 5556
 until a new model arrives. The server always exports+publishes after every
-episode (background thread), so the car unblocks as soon as export finishes.
+training episode, so the car unblocks as soon as export finishes.
+
+Model transport uses PUSH/PULL (not PUB/SUB) so messages are queued until
+the receiver connects — avoids the slow-joiner race where a PUB fires before
+the SUB has completed its TCP handshake. CONFLATE=1 on the PULL socket ensures
+only the latest model is kept, discarding stale queued weights.
+
+Discard protocol: when the car operator discards an episode, the car sends a
+lightweight discard notification instead of full experience. The server skips
+training for that episode and waits for the next one, avoiding a deadlock where
+the server blocks on recv() indefinitely.
 """
 
 import pickle
@@ -27,6 +37,7 @@ MODEL_PORT      = 5556
 
 class NoopSender:
     def send(self, **_): pass
+    def send_discard(self, episode_num: int): pass
 
 
 class NoopSubscriber:
@@ -45,7 +56,7 @@ def make_comms(server_ip: str):
 # ---------------------------------------------------------------------------
 
 class ExperienceSender:
-    """Car — pushes one episode to the server at episode end."""
+    """Car — pushes one episode (or discard notification) to the server."""
 
     def __init__(self, server_ip: str, port: int = EXPERIENCE_PORT):
         ctx = zmq.Context()
@@ -63,17 +74,23 @@ class ExperienceSender:
         meta:    {'episode_num': int, 'steps': int}
         """
         payload = {
-            'obs':     obs,
-            'actions': actions,
-            'rewards': rewards,
-            'dones':   dones,
+            'obs':       obs,
+            'actions':   actions,
+            'rewards':   rewards,
+            'dones':     dones,
+            'discarded': False,
             **meta,
         }
         self.sock.send(pickle.dumps(payload))
 
+    def send_discard(self, episode_num: int):
+        """Notify server that this episode was discarded — no experience to train on."""
+        payload = {'discarded': True, 'episode_num': episode_num}
+        self.sock.send(pickle.dumps(payload))
+
 
 class ExperienceReceiver:
-    """Server — blocks until an episode arrives from the car."""
+    """Server — blocks until an episode or discard notification arrives from the car."""
 
     def __init__(self, bind_ip: str = '*', port: int = EXPERIENCE_PORT):
         ctx = zmq.Context()
@@ -90,11 +107,16 @@ class ExperienceReceiver:
 # ---------------------------------------------------------------------------
 
 class ModelPublisher:
-    """Server — broadcasts updated .tflite bytes after each export."""
+    """Server — pushes updated .tflite bytes to the car after each export.
+
+    Uses PUSH socket so messages are queued until the car connects (no slow-joiner
+    loss). Car uses CONFLATE=1 so only the latest model is kept.
+    """
 
     def __init__(self, bind_ip: str = '*', port: int = MODEL_PORT):
         ctx = zmq.Context()
-        self.sock = ctx.socket(zmq.PUB)
+        self.sock = ctx.socket(zmq.PUSH)
+        self.sock.setsockopt(zmq.SNDTIMEO, 10_000)   # 10 s timeout — don't block if car disconnected
         self.sock.bind(f'tcp://{bind_ip}:{port}')
         print(f'[Comms] ModelPublisher bound on tcp://{bind_ip}:{port}')
 
@@ -102,9 +124,13 @@ class ModelPublisher:
         with open(tflite_path, 'rb') as f:
             model_bytes = f.read()
         payload = pickle.dumps({'model_bytes': model_bytes, 'step': step})
-        self.sock.send_multipart([b'model', payload])
-        print(f'[Comms] Published model — step {step}, '
-              f'size {len(model_bytes) / 1024:.0f} KB')
+        try:
+            self.sock.send(payload)
+            print(f'[Comms] Published model — step {step}, '
+                  f'size {len(model_bytes) / 1024:.0f} KB')
+        except zmq.Again:
+            print(f'[Comms] WARNING: model publish timed out — '
+                  f'car not connected on port {MODEL_PORT}? Skipping.')
 
 
 class ModelSubscriber:
@@ -112,15 +138,13 @@ class ModelSubscriber:
 
     def __init__(self, server_ip: str, port: int = MODEL_PORT):
         ctx = zmq.Context()
-        self.sock = ctx.socket(zmq.SUB)
+        self.sock = ctx.socket(zmq.PULL)
         self.sock.connect(f'tcp://{server_ip}:{port}')
-        self.sock.setsockopt(zmq.SUBSCRIBE, b'model')
         print(f'[Comms] ModelSubscriber ← tcp://{server_ip}:{port}')
 
     def poll(self) -> dict | None:
         """Returns dict with model_bytes + step if available, else None."""
         try:
-            _, payload = self.sock.recv_multipart(zmq.NOBLOCK)
-            return pickle.loads(payload)
+            return pickle.loads(self.sock.recv(zmq.NOBLOCK))
         except zmq.Again:
             return None

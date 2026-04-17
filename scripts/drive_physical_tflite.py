@@ -237,6 +237,8 @@ class PhysicalDreamerCar:
                     if discard:
                         self.send_zero()
                         print('\n[Car] DISCARD — episode erased, retrying...')
+                        if self.args.server_ip:
+                            self.sender.send_discard(episode_num)
                         discarded = True
                         break
 
@@ -289,6 +291,7 @@ class PhysicalDreamerCar:
             # Keeps motors zeroed. Noop when running standalone.
             if self.args.server_ip and episode_num > self.args.seed_episodes:
                 print('[Car] Waiting for server to finish training + export...')
+                wait_start = time.time()
                 while True:
                     self.send_zero()
                     update = self.model_sub.poll()
@@ -298,6 +301,11 @@ class PhysicalDreamerCar:
                         self.model.reload(update['model_bytes'])
                         print(f'done. (server step {update["step"]})')
                         break
+                    elapsed = time.time() - wait_start
+                    if elapsed > 120:
+                        print(f'[Car] WARNING: no model from server after {elapsed:.0f}s — '
+                              f'check server is running and port {5556} is reachable.')
+                        wait_start = time.time()   # reset so warning repeats every 120 s
                     if self.ps4.should_quit:
                         break
                     time.sleep(0.05)

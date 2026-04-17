@@ -171,6 +171,11 @@ while episode_count < args.episodes:
     print(f'[Server] Waiting for episode {episode_count + 1}/{args.episodes}...')
     ep = receiver.recv()
 
+    # Car discarded the episode — no experience to train on; just unblock the loop.
+    if ep.get('discarded', False):
+        print(f'[Server] Episode {ep.get("episode_num", "?")} discarded by operator — skipping.')
+        continue
+
     obs     = ep['obs']       # [T, C, 64, 64]  float32
     actions = ep['actions']   # [T, action_size] float32
     rewards = ep['rewards']   # [T]              float32
@@ -205,9 +210,15 @@ while episode_count < args.episodes:
     ])
     csv_file.flush()
 
-    # Only export + save images post-seed (car halts waiting for model push).
-    if episode_count > args.seed_episodes and episode_count % args.push_interval == 0:
-        save_reconstruction(episode_count)
+    # After last seed episode: push initial weights to unblock the car.
+    # Post-seed: always export+publish so the car is never left waiting.
+    # Reconstruction images are saved every push_interval episodes only.
+    if episode_count == args.seed_episodes:
+        print('[Server] Seed phase complete — pushing initial model to car...')
+        export_and_publish(episode_count)
+    elif episode_count > args.seed_episodes:
+        if episode_count % args.push_interval == 0:
+            save_reconstruction(episode_count)
         export_and_publish(episode_count)
 
     if episode_count % args.checkpoint_interval == 0:
