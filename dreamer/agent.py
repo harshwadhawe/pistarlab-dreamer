@@ -416,9 +416,10 @@ class Dreamer:
     # ------------------------------------------------------------------
 
     def save_reconstruction(self, images_dir: str, episode: int, total_episodes: int,
-                            n_show: int = 8, max_keep: int = 5) -> None:
+                            n_show: int = 5, max_keep: int = 5) -> None:
         """Sample a replay batch, reconstruct via world model, save real/pred grid.
 
+        Grid layout: real observations (top row) | reconstructions (bottom row), n_show columns.
         Saves ep_NNN.png (zero-padded to total_episodes width) and latest.png.
         Prunes episode images to max_keep randomly selected files.
         """
@@ -433,8 +434,10 @@ class Dreamer:
                 nonterminals[:-1],
             )
             recon = bottle(self.observation_model, (beliefs, post_states))
-            real = (obs[1:].reshape(-1, *obs.shape[2:]) + 0.5).clamp(0, 1)
-            pred = (recon.reshape(-1, *recon.shape[2:]) + 0.5).clamp(0, 1)
+            # Pick the middle timestep from each sequence — representative, not first/last
+            mid = self.args.chunk_size // 2
+            real = (obs[mid, :n_show] + 0.5).clamp(0, 1)   # [n_show, C, H, W]
+            pred = (recon[mid - 1, :n_show] + 0.5).clamp(0, 1)
             grid = make_grid(torch.cat([real, pred], dim=0), nrow=n_show)
         self.set_train_mode()
 

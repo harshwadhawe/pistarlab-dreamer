@@ -263,7 +263,8 @@ for episode in tqdm(
         )
         if not args.symbolic:
             episode_str = str(episode).zfill(len(str(args.episodes)))
-            write_video(video_frames, 'ep_%s' % episode_str, videos_dir)
+            if video_frames:
+                write_video(video_frames, 'ep_%s' % episode_str, videos_dir)
             agent.save_reconstruction(images_dir, episode, args.episodes)
         torch.save(metrics, os.path.join(results_dir, 'metrics.pth'))
 
