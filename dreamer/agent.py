@@ -112,6 +112,7 @@ class Dreamer:
         # Return normalisation EMAs (Dreamer v3)
         self._ret_ema_low = 1.0
         self._ret_ema_high = 1.0
+        self._norm_step = 0
 
     def process_im(self, images, image_size=64, rgb=None):
         from .envs.env import _images_to_observation
@@ -201,13 +202,18 @@ class Dreamer:
 
         returns = cal_returns(imag_rewards[:-1], imag_values[:-1], imag_values[-1], pcont[:-1], lambda_=self.args.disclam)
 
-        # Return normalisation (Dreamer v3): scale by running 5th/95th percentile range
+        # Return normalisation (Dreamer v3): recompute percentiles every 10 steps.
+        # EMA smooths the scale so stale percentiles are fine between updates.
         if self.args.return_norm:
-            with torch.no_grad():
-                p5  = torch.quantile(returns, 0.05).item()
-                p95 = torch.quantile(returns, 0.95).item()
-            self._ret_ema_low  = 0.99 * self._ret_ema_low  + 0.01 * p5
-            self._ret_ema_high = 0.99 * self._ret_ema_high + 0.01 * p95
+            self._norm_step += 1
+            if self._norm_step % 10 == 1:
+                with torch.no_grad():
+                    flat = returns.flatten()
+                    n = flat.numel()
+                    p5  = torch.kthvalue(flat, max(1, int(0.05 * n))).values.item()
+                    p95 = torch.kthvalue(flat, max(1, int(0.95 * n))).values.item()
+                self._ret_ema_low  = 0.99 * self._ret_ema_low  + 0.01 * p5
+                self._ret_ema_high = 0.99 * self._ret_ema_high + 0.01 * p95
             S = max(1.0, self._ret_ema_high - self._ret_ema_low)
             returns = returns / S
 
