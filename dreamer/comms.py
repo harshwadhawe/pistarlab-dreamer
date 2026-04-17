@@ -22,6 +22,25 @@ MODEL_PORT      = 5556
 
 
 # ---------------------------------------------------------------------------
+# Null-object implementations — used when running without a server
+# ---------------------------------------------------------------------------
+
+class NoopSender:
+    def send(self, **_): pass
+
+
+class NoopSubscriber:
+    def poll(self): return None
+
+
+def make_comms(server_ip: str):
+    """Return (sender, subscriber) — real ZMQ pair or no-ops if server_ip is empty."""
+    if not server_ip:
+        return NoopSender(), NoopSubscriber()
+    return ExperienceSender(server_ip), ModelSubscriber(server_ip)
+
+
+# ---------------------------------------------------------------------------
 # Experience transport  (car → server)
 # ---------------------------------------------------------------------------
 

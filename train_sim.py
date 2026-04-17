@@ -2,6 +2,7 @@ import argparse
 import csv
 import os
 import random
+import time
 from datetime import datetime
 
 import numpy as np
@@ -95,19 +96,15 @@ metrics = {
     'episode_lengths': [], 'mean_cte': [],
 }
 
-human_override = None
+controller = None
 if args.human_override:
-    from dreamer.envs.human_override import HumanOverride
-    human_override = HumanOverride()
-    print('Human override active — pygame window open.')
-    print('  =         : stop (off-track penalty)')
-    print('  ↑ Up      : reset (clean lap)')
-    print('  ↓ Down    : quit training')
+    from dreamer.envs.controller import EpisodeController
+    controller = EpisodeController.from_keyboard()
 
 env = Env(args.env, args.symbolic, args.seed, args.max_episode_length,
           args.action_repeat, args.bit_depth, sim_path=args.sim_path,
           host=args.host, port=args.port, use_visual_reward=args.use_visual_reward,
-          human_override=human_override, smooth_weight=args.smooth_weight,
+          controller=controller, smooth_weight=args.smooth_weight,
           smooth_window=args.smooth_window, channels=args.channels)
 agent = Dreamer(args)
 
@@ -122,6 +119,15 @@ if args.experience_replay != '' and os.path.exists(args.experience_replay):
     )
 elif not args.test:
     for s in range(1, args.seed_episodes + 1):
+        if controller:
+            print(f'[Sim] Seed episode {s}/{args.seed_episodes}. Press → Right to start...')
+            while True:
+                if hasattr(env, 'brake'):
+                    env.brake()
+                ev = controller.consume_event()
+                if ev == controller.START:
+                    break
+                time.sleep(0.05)
         observation, done, t = env.reset(), False, 0
         while not done:
             action = env.sample_random_action()
@@ -133,7 +139,7 @@ elif not args.test:
         metrics['steps'].append(
             t * args.action_repeat + (0 if not metrics['steps'] else metrics['steps'][-1])
         )
-        metrics['episodes'].append(s)
+        metrics['episodes'].append(s)  # s is 1-based
 
 # ---------------------------------------------------------------------------
 # Training loop
@@ -143,10 +149,6 @@ for episode in tqdm(
     total=args.episodes,
     initial=metrics['episodes'][-1] + 1,
 ):
-    if human_override and human_override.should_quit:
-        print('Quit requested via human override — stopping training.')
-        break
-
     # Park the car while the world model trains (zero throttle)
     if hasattr(env, 'brake'):
         env.brake()
@@ -166,33 +168,51 @@ for episode in tqdm(
     lineplot(metrics['episodes'][-len(metrics['actor_loss']):], metrics['actor_loss'], 'actor_loss', results_dir)
     lineplot(metrics['episodes'][-len(metrics['value_loss']):], metrics['value_loss'], 'value_loss', results_dir)
 
-    # --- Data collection ---
+    # --- Data collection (retries on discard) ---
     with torch.no_grad():
-        observation, total_reward = env.reset(), 0
-        belief = torch.zeros(1, args.belief_size, device=args.device)
-        posterior_state = torch.zeros(1, args.state_size, device=args.device)
-        action = torch.zeros(1, env.action_size, device=args.device)
-        cte_history = []
+        while True:
+            buf_snap = agent.D.snapshot()
+            observation, total_reward = env.reset(), 0
+            belief = torch.zeros(1, args.belief_size, device=args.device)
+            posterior_state = torch.zeros(1, args.state_size, device=args.device)
+            action = torch.zeros(1, env.action_size, device=args.device)
+            cte_history = []
 
-        pbar = tqdm(range(args.max_episode_length // args.action_repeat))
-        for t in pbar:
-            belief, posterior_state = agent.infer_state(
-                observation.to(device=args.device), action, belief, posterior_state
-            )
-            action = agent.select_action((belief, posterior_state), deterministic=False)
-            next_observation, reward, done = env.step(
-                action.cpu() if isinstance(env, EnvBatcher) else action[0].cpu()
-            )
-            agent.D.append(next_observation, action.cpu(), reward, done)
-            total_reward += reward
-            observation = next_observation
-            if hasattr(env, 'last_cte') and not args.human_override:
-                cte_history.append(abs(env.last_cte))
-            if args.render:
-                env.render()
-            if done:
-                pbar.close()
+            pbar = tqdm(range(args.max_episode_length // args.action_repeat))
+            for t in pbar:
+                belief, posterior_state = agent.infer_state(
+                    observation.to(device=args.device), action, belief, posterior_state
+                )
+                action = agent.select_action((belief, posterior_state), deterministic=False)
+                next_observation, reward, done = env.step(
+                    action.cpu() if isinstance(env, EnvBatcher) else action[0].cpu()
+                )
+                agent.D.append(next_observation, action.cpu(), reward, done)
+                total_reward += reward
+                observation = next_observation
+                if hasattr(env, 'last_cte') and not args.human_override:
+                    cte_history.append(abs(env.last_cte))
+                if args.render:
+                    env.render()
+                if done:
+                    pbar.close()
+                    break
+
+            if getattr(env, 'discard_requested', False):
+                agent.D.restore(buf_snap)
+                print('[DISCARD] Episode erased — retrying...')
+                continue
+            break
+
+    if controller:
+        print('[Sim] Episode done. Press → Right to start next episode...')
+        while True:
+            if hasattr(env, 'brake'):
+                env.brake()
+            ev = controller.consume_event()
+            if ev == controller.START:
                 break
+            time.sleep(0.05)
 
     ep_len = t + 1
     cte_arr = np.array(cte_history) if cte_history else np.array([0.0])

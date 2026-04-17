@@ -463,6 +463,27 @@ class Dreamer:
                   self.encoder, self.actor_model, self.value_model):
             m.eval()
 
+    def append_episode(self, obs, actions, rewards, dones) -> None:
+        """Append a full episode (numpy arrays) to the replay buffer."""
+        for t in range(len(rewards)):
+            self.D.append(
+                torch.as_tensor(obs[t]),
+                actions[t],
+                float(rewards[t]),
+                bool(dones[t]),
+            )
+
+    def save_inference_checkpoint(self, path: str) -> None:
+        """Save encoder + transition + actor to a lightweight checkpoint for TFLite export."""
+        torch.save({
+            'encoder':          self.encoder.cpu().state_dict(),
+            'transition_model': self.transition_model.cpu().state_dict(),
+            'actor_model':      self.actor_model.cpu().state_dict(),
+        }, path)
+        self.encoder.to(self.args.device)
+        self.transition_model.to(self.args.device)
+        self.actor_model.to(self.args.device)
+
     def save_checkpoint(self, path: str) -> None:
         torch.save({
             'transition_model':  self.transition_model.state_dict(),

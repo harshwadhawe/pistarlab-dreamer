@@ -27,6 +27,14 @@ class ExperienceReplay:
         self.episodes = 0
         self.bit_depth = bit_depth
 
+    def snapshot(self):
+        """Return a lightweight checkpoint of buffer pointers (not data)."""
+        return (self.idx, self.steps, self.episodes, self.full)
+
+    def restore(self, snap):
+        """Roll back to a previous snapshot, discarding appended entries."""
+        self.idx, self.steps, self.episodes, self.full = snap
+
     def append(self, observation, action, reward, done):
         self.observations[self.idx] = observation.numpy()
         self.actions[self.idx] = action.numpy() if isinstance(action, torch.Tensor) else action

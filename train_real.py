@@ -121,14 +121,7 @@ def export_and_publish(episode_count: int) -> None:
     tflite_path = os.path.join(args.results_dir, f'inference_{episode_count}.tflite')
     ckpt_path   = os.path.join(args.results_dir, f'export_weights_{episode_count}.pth')
 
-    torch.save({
-        'encoder':          agent.encoder.cpu().state_dict(),
-        'transition_model': agent.transition_model.cpu().state_dict(),
-        'actor_model':      agent.actor_model.cpu().state_dict(),
-    }, ckpt_path)
-    agent.encoder.to(args.device)
-    agent.transition_model.to(args.device)
-    agent.actor_model.to(args.device)
+    agent.save_inference_checkpoint(ckpt_path)
 
     cmd = [
         sys.executable, 'scripts/export_pth_to_tflite.py', ckpt_path,
@@ -184,14 +177,7 @@ while episode_count < args.episodes:
     dones   = ep['dones']     # [T]              bool
     T       = len(rewards)
 
-    # Append to replay buffer — obs already in [-0.5, 0.5]
-    for t in range(T):
-        agent.D.append(
-            torch.as_tensor(obs[t]),
-            actions[t],
-            float(rewards[t]),
-            bool(dones[t]),
-        )
+    agent.append_episode(obs, actions, rewards, dones)
 
     episode_count += 1
     total_reward = float(rewards.sum())

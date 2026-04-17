@@ -226,14 +226,7 @@ def mini_server():
         ep = rx.recv()
         T  = len(ep['rewards'])
 
-        # Append to buffer
-        for t in range(T):
-            agent.D.append(
-                torch.as_tensor(ep['obs'][t]),
-                ep['actions'][t],
-                float(ep['rewards'][t]),
-                bool(ep['dones'][t]),
-            )
+        agent.append_episode(ep['obs'], ep['actions'], ep['rewards'], ep['dones'])
 
         round_trip_result['episode_received'] = ep['episode_num']
 

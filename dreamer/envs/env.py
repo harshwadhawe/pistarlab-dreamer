@@ -3,6 +3,8 @@ import cv2
 import numpy as np
 import torch
 
+from ..utils.obs import preprocess_frame
+
 
 GYM_ENVS = [
     'Pendulum-v0', 'MountainCarContinuous-v0', 'Ant-v2', 'HalfCheetah-v2',
@@ -42,25 +44,9 @@ def postprocess_observation(observation, bit_depth):
 
 
 def _images_to_observation(images, bit_depth, channels=1):
-    """
-    Crop top 40 rows (sky), resize to 64×64.
-    Returns tensor [-0.5, 0.5] shaped (1, C, H, W).
-
-    Raw camera:  120×160  (H×W)
-    After crop:   80×160  (removes sky, keeps road + horizon)
-    After resize: 64×64   (square — more pixels = richer features)
-
-    channels=1  → grayscale  (1×64×64)   phase B  (current)
-    channels=3  → RGB        (3×64×64)   phase A  (future)
-    """
-    images = images[40:, :, :]
-    images = cv2.resize(images, (64, 64))
-    if channels == 1:
-        images = np.dot(images, [0.299, 0.587, 0.114])
-        obs = torch.tensor(images, dtype=torch.float32).div_(255.).sub_(0.5).unsqueeze(0)
-    else:
-        obs = torch.tensor(images, dtype=torch.float32).div_(255.).sub_(0.5).permute(2, 0, 1)
-    return obs.unsqueeze(0)  # (1, C, 64, 64)
+    """Preprocess raw camera frame → batched torch tensor (1, C, 64, 64) in [-0.5, 0.5]."""
+    obs = preprocess_frame(images, channels)          # (C, 64, 64) numpy
+    return torch.as_tensor(obs).unsqueeze(0)          # (1, C, 64, 64) torch
 
 
 class ControlSuiteEnv:
@@ -224,14 +210,15 @@ class DonkeyCarEnv:
 
     def __init__(self, env, symbolic, seed, max_episode_length, action_repeat, bit_depth,
                  sim_path, host='127.0.0.1', port=9091, use_visual_reward=False,
-                 human_override=None, smooth_weight=0.0, smooth_window=10, channels=1):
+                 controller=None, smooth_weight=0.0, smooth_window=10, channels=1):
         import gymnasium as gym
         import gym_donkeycar  # registers envs with gymnasium
         self.symbolic = symbolic
         self._seed = seed
         self._first_reset = True
         self.use_visual_reward = use_visual_reward
-        self.human_override = human_override   # HumanOverride instance or None
+        self.controller = controller
+        self.discard_requested = False
         conf = {'host': host, 'port': port, 'max_cte': 4}
         if sim_path != 'self':
             conf['exe_path'] = sim_path
@@ -260,6 +247,7 @@ class DonkeyCarEnv:
         self._episode_steps  = 0
         self._episode_num   += 1
         self._steer_buf.clear()
+        self.discard_requested = False
         # Pass seed only on the very first reset so subsequent episodes
         # use the env's internal seeded RNG rather than resetting to the same state.
         if self._first_reset:
@@ -270,7 +258,6 @@ class DonkeyCarEnv:
         return _images_to_observation(obs, self.bit_depth, channels=self._channels)
 
     def step(self, action):
-        from .human_override import HumanOverride
         action = action.detach().numpy()
         reward = 0
         for _ in range(self.action_repeat):
@@ -279,30 +266,13 @@ class DonkeyCarEnv:
             speed = float(info.get('speed', 0.0))
             hit   = info.get('hit', 'none') != 'none'
 
-            if self.human_override is not None:
+            if self.controller is not None:
                 # Human operator decides BOTH reward and termination.
                 # Suppress sim's CTE-based terminated/reward entirely.
-                terminated = False
-                reward_k   = 1.0   # default: survived this step
-
-                ev = self.human_override.consume_event()
-                if ev == HumanOverride.STOP:
-                    reward_k   = -1.0
-                    terminated = True
-                elif ev == HumanOverride.RESET:
-                    reward_k   = 0.0
-                    terminated = True
-                elif ev == HumanOverride.QUIT:
-                    reward_k   = 0.0
-                    terminated = True
-
-                # Push latest frame + stats to the pygame display
-                self.human_override.update_frame(state, {
-                    'episode': self._episode_num,
-                    'steps':   self._episode_steps,
-                    'speed':   speed,
-                    'reward':  self._episode_reward,
-                })
+                ev = self.controller.consume_event()
+                reward_k, terminated, discard = self.controller.event_to_outcome(ev)
+                if discard:
+                    self.discard_requested = True
             elif self.use_visual_reward:
                 visual_cte = _visual_cte(state)
                 if visual_cte is None:
@@ -315,7 +285,7 @@ class DonkeyCarEnv:
             else:
                 self.last_cte = float(info.get('cte', 0.0))
 
-            if self.human_override is None:
+            if self.controller is None:
                 # Automatic termination guards (not needed when human is watching)
                 if hit:
                     terminated = True
@@ -372,7 +342,7 @@ class DonkeyCarEnv:
 
 
 def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth, sim_path, host, port,
-        use_visual_reward=False, human_override=None, smooth_weight=0.0, smooth_window=10, channels=1):
+        use_visual_reward=False, controller=None, smooth_weight=0.0, smooth_window=10, channels=1):
     if env in GYM_ENVS:
         return GymEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth)
     elif env in CONTROL_SUITE_ENVS:
@@ -380,7 +350,7 @@ def Env(env, symbolic, seed, max_episode_length, action_repeat, bit_depth, sim_p
     elif env in DONKEY_CAR_ENVS:
         return DonkeyCarEnv(env, symbolic, seed, max_episode_length, action_repeat, bit_depth,
                             sim_path, host, port, use_visual_reward=use_visual_reward,
-                            human_override=human_override, smooth_weight=smooth_weight,
+                            controller=controller, smooth_weight=smooth_weight,
                             smooth_window=smooth_window, channels=channels)
     else:
         raise NotImplementedError(f'Unknown environment: {env}')

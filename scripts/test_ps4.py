@@ -8,21 +8,18 @@ Run on car:
 
 import os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from dreamer.envs.ps4_override import PS4Override
+from dreamer.envs.controller import EpisodeController
 
-ps4 = PS4Override()
+ctrl = EpisodeController.from_gamepad()
 print('Press buttons on PS4 controller. Ctrl+C to exit.\n')
 
 try:
     while True:
-        ev = ps4.consume_event()
+        ev = ctrl.consume_event()
         if ev:
-            print(f'  Event: {ev}  |  paused={ps4.is_paused}')
-            if ev == PS4Override.QUIT:
-                print('QUIT received — exiting.')
-                break
+            print(f'  Event: {ev}')
         time.sleep(0.05)
 except KeyboardInterrupt:
     print('\nExiting.')
 finally:
-    ps4.stop()
+    ctrl.close()

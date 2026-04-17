@@ -38,11 +38,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 
 import warnings
 import numpy as np
-import cv2
 import tflite_runtime.interpreter as tflite
 
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 
+from dreamer.utils.obs import preprocess_frame
 from donkeycar.parts.actuator import PCA9685
 from donkeycar.parts.camera import PiCamera
 
@@ -58,7 +58,6 @@ THROTTLE_STOPPED_PWM = 400
 THROTTLE_REVERSE_PWM = 320
 
 # --- Tuning ---
-IMG_CROP_TOP   = 40       # rows to crop from top of 120-row frame → 80 rows remain
 STEERING_GAIN  = 1.0
 THROTTLE_BOOST = 1.0
 
@@ -125,25 +124,10 @@ class DreamerTFLite:
 
 
 # ---------------------------------------------------------------------------
-# ZMQ comms (optional — only imported when --server_ip is set)
+# ZMQ comms (optional — only active when --server_ip is set)
 # ---------------------------------------------------------------------------
 
-class NoopSender:
-    def send(self, **_): pass
-
-
-class NoopSubscriber:
-    def poll(self): return None
-
-
-def make_comms(server_ip):
-    if not server_ip:
-        return NoopSender(), NoopSubscriber()
-    from dreamer.comms import ExperienceSender, ModelSubscriber
-    return (
-        ExperienceSender(server_ip),
-        ModelSubscriber(server_ip),
-    )
+from dreamer.comms import make_comms
 
 
 # ---------------------------------------------------------------------------
@@ -184,8 +168,8 @@ class PhysicalDreamerCar:
             self.sender, self.model_sub = make_comms(args.server_ip)
 
             print('[INFO] Connecting PS4 controller...')
-            from dreamer.envs.ps4_override import PS4Override
-            self.ps4 = PS4Override()
+            from dreamer.envs.controller import EpisodeController
+            self.ps4 = EpisodeController.from_gamepad()
 
             print('[OK] All systems nominal.\n')
 
@@ -195,14 +179,7 @@ class PhysicalDreamerCar:
             sys.exit(1)
 
     def preprocess(self, frame):
-        """[120,128,3] uint8 → [C,64,64] float32 [-0.5,0.5]"""
-        cropped = frame[IMG_CROP_TOP:IMG_CROP_TOP + 80, :, :]   # [80,128,3]
-        resized = cv2.resize(cropped, (64, 64))                  # [64,64,3]
-        if self.args.channels == 1:
-            gray = np.dot(resized, [0.299, 0.587, 0.114]).astype(np.float32)
-            return (gray / 255.0 - 0.5)[np.newaxis]             # [1,64,64]
-        obs = resized.astype(np.float32) / 255.0 - 0.5
-        return obs.transpose(2, 0, 1)                            # [3,64,64]
+        return preprocess_frame(frame, self.args.channels)
 
     def send_action(self, steering_val, throttle_val):
         s = float(np.clip(steering_val * STEERING_GAIN, -1.0, 1.0))
@@ -218,72 +195,69 @@ class PhysicalDreamerCar:
     def run(self):
         print('='*52)
         print('  AUTONOMOUS MODE')
-        print('  R1         → START next episode')
-        print('  ○ Circle   → STOP  (off-track, reward -1)')
-        print('  × Cross    → RESET (clean lap,  reward  0)')
-        print('  △ Triangle → QUIT  (end session)')
-        print('  □ Square   → PAUSE (hold zero throttle)')
+        print('  R1         → START   next episode')
+        print('  ○ Circle   → STOP    (off-track, reward -1)')
+        print('  × Cross    → RESET   (clean lap,  reward +1)')
+        print('  □ Square   → DISCARD (erase episode, retry)')
+        print('  Ctrl+C to stop session.')
         print('='*52 + '\n')
 
-        episode_num = 0
+        episode_num = 1
 
-        while not self.ps4.should_quit:
-            obs_buf, act_buf, rew_buf, done_buf = [], [], [], []
-            self.model.reset_state()
-
+        while True:
             print(f'[Car] Episode {episode_num} — running...')
 
-            while True:
-                t0 = time.time()
+            discarded = True
+            while discarded:
+                obs_buf, act_buf, rew_buf, done_buf = [], [], [], []
+                self.model.reset_state()
+                discarded = False
 
-                # PAUSE — hold zero throttle until released
-                if self.ps4.is_paused:
-                    self.send_zero()
-                    time.sleep(0.05)
-                    continue
+                while True:
+                    t0 = time.time()
 
-                frame  = self.camera.run()
-                obs    = self.preprocess(frame)
-                action = self.model.step(obs)
+                    frame  = self.camera.run()
+                    obs    = self.preprocess(frame)
+                    action = self.model.step(obs)
 
-                # Seed episodes: override steering with uniform random [-1, 1]
-                # held for ~0.5s so the car actually moves before switching.
-                if episode_num < self.args.seed_episodes:
-                    if not hasattr(self, '_seed_steer') or \
-                            time.time() - self._seed_steer_t >= 0.5:
-                        self._seed_steer   = float(np.random.uniform(-1.0, 1.0))
-                        self._seed_steer_t = time.time()
-                    action = action.copy()
-                    action[0] = self._seed_steer
+                    # Seed episodes: override steering with uniform random [-1, 1]
+                    # held for ~0.5s so the car actually moves before switching.
+                    if episode_num <= self.args.seed_episodes:
+                        if not hasattr(self, '_seed_steer') or \
+                                time.time() - self._seed_steer_t >= 0.5:
+                            self._seed_steer   = float(np.random.uniform(-1.0, 1.0))
+                            self._seed_steer_t = time.time()
+                        action = action.copy()
+                        action[0] = self._seed_steer
 
-                s, t   = self.send_action(float(action[0]), float(action[1]))
+                    s, t = self.send_action(float(action[0]), float(action[1]))
 
-                ev     = self.ps4.consume_event()
-                if ev == self.ps4.STOP:
-                    reward, done = -1.0, True
-                elif ev == self.ps4.RESET:
-                    reward, done =  0.0, True
-                else:
-                    reward, done =  1.0, False
+                    ev = self.ps4.consume_event()
+                    reward, done, discard = self.ps4.event_to_outcome(ev)
+                    if discard:
+                        self.send_zero()
+                        print('\n[Car] DISCARD — episode erased, retrying...')
+                        discarded = True
+                        break
 
-                if len(rew_buf) >= self.args.max_episode_steps:
-                    reward, done = 1.0, True   # clean timeout — full reward
+                    if len(rew_buf) >= self.args.max_episode_steps:
+                        reward, done = 1.0, True   # clean timeout — full reward
 
-                obs_buf.append(obs.copy())
-                act_buf.append(action.copy())
-                rew_buf.append(reward)
-                done_buf.append(done)
+                    obs_buf.append(obs.copy())
+                    act_buf.append(action.copy())
+                    rew_buf.append(reward)
+                    done_buf.append(done)
 
-                fps = 1.0 / max(time.time() - t0, 1e-6)
-                print(
-                    f'[Ep {episode_num}] FPS:{fps:4.1f} | '
-                    f'Steer:{s:>6.3f} | Throt:{t:>5.3f} | '
-                    f'Steps:{len(rew_buf):>4d}',
-                    end='\r',
-                )
+                    fps = 1.0 / max(time.time() - t0, 1e-6)
+                    print(
+                        f'[Ep {episode_num}] FPS:{fps:4.1f} | '
+                        f'Steer:{s:>6.3f} | Throt:{t:>5.3f} | '
+                        f'Steps:{len(rew_buf):>4d}',
+                        end='\r',
+                    )
 
-                if done or self.ps4.should_quit:
-                    break
+                    if done or self.ps4.should_quit:
+                        break
 
             self.send_zero()
 
@@ -329,16 +303,15 @@ class PhysicalDreamerCar:
                     time.sleep(0.05)
 
             # Wait for R1 before starting next episode
-            print('[Car] Press R1 to start next episode | △ to quit...')
+            print('[Car] Press R1 to start next episode...')
             while True:
+                self.send_zero()
                 ev = self.ps4.consume_event()
                 if ev == self.ps4.START:
                     break
-                if ev == self.ps4.QUIT or self.ps4.should_quit:
-                    break
                 time.sleep(0.05)
 
-        self.ps4.stop()
+        self.ps4.close()
         self.shutdown()
 
     def shutdown(self):
