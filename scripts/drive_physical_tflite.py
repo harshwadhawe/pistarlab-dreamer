@@ -247,10 +247,14 @@ class PhysicalDreamerCar:
                 action = self.model.step(obs)
 
                 # Seed episodes: override steering with uniform random [-1, 1]
-                # so the buffer gets diverse coverage instead of near-zero steer.
+                # held for ~0.5s so the car actually moves before switching.
                 if episode_num < self.args.seed_episodes:
+                    if not hasattr(self, '_seed_steer') or \
+                            time.time() - self._seed_steer_t >= 0.5:
+                        self._seed_steer   = float(np.random.uniform(-1.0, 1.0))
+                        self._seed_steer_t = time.time()
                     action = action.copy()
-                    action[0] = float(np.random.uniform(-1.0, 1.0))
+                    action[0] = self._seed_steer
 
                 s, t   = self.send_action(float(action[0]), float(action[1]))
 
