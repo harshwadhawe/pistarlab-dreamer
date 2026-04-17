@@ -144,7 +144,7 @@ class KeyboardBackend:
 
 _BTN_CIRCLE = 305   # ○
 _BTN_CROSS  = 304   # ×
-_BTN_SQUARE = 307   # □
+_BTN_SQUARE = 308   # □
 _BTN_R1     = 311   # R1
 
 
