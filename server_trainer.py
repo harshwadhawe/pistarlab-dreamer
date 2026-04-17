@@ -277,10 +277,7 @@ while episode_count < args.episodes:
 
     loss_info = None
     if episode_count > args.seed_episodes:
-        # First training round covers all seed data; subsequent rounds = 1 episode worth.
-        grad_steps = (args.collect_interval * (args.seed_episodes + 1)
-                      if episode_count == args.seed_episodes + 1
-                      else args.collect_interval)
+        grad_steps = args.collect_interval
         print(f'[Server] Training {grad_steps} gradient steps...')
         loss_info = agent.update_parameters(grad_steps)
         losses = np.mean(loss_info, axis=0)
