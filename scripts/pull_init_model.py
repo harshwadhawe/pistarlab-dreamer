@@ -20,7 +20,7 @@ from dreamer.comms import MODEL_PORT
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--server_ip', required=True, help='Server IP address')
-parser.add_argument('--output_dir', default='.',  help='Directory to save models (default: current dir)')
+parser.add_argument('--output_dir', default='models', help='Directory to save models (default: models/)')
 args = parser.parse_args()
 
 os.makedirs(args.output_dir, exist_ok=True)

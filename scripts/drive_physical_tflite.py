@@ -116,7 +116,8 @@ class DreamerTFLite:
 
     def reload(self, model_bytes: bytes):
         """Hot-reload weights without restarting the control loop."""
-        tmp = '/tmp/inference_reload.tflite'
+        tmp = 'models/inference_active.tflite'
+        os.makedirs('models', exist_ok=True)
         with open(tmp, 'wb') as f:
             f.write(model_bytes)
         self._load(tmp)
@@ -361,7 +362,7 @@ if __name__ == '__main__':
 
     if not args.model:
         label      = 'grayscale' if args.grayscale else 'rgb'
-        args.model = f'inference_{label}.tflite'
+        args.model = f'models/inference_{label}.tflite'
     print(f'[Init] Using model: {args.model} (channels={args.channels})')
 
     car = PhysicalDreamerCar(args)
