@@ -12,7 +12,6 @@ import argparse
 import os
 import pickle
 import sys
-import zlib
 
 import zmq
 
@@ -37,7 +36,7 @@ try:
     for _ in range(2):   # expect rgb + grayscale
         data        = pickle.loads(sock.recv())
         label       = data['label']
-        model_bytes = zlib.decompress(data['model_bytes']) if data.get('compressed') else data['model_bytes']
+        model_bytes = data['model_bytes']
         out_path    = os.path.join(args.output_dir, f'inference_{label}.tflite')
         with open(out_path, 'wb') as f:
             f.write(model_bytes)

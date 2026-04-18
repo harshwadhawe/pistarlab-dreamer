@@ -24,7 +24,6 @@ the server blocks on recv() indefinitely.
 """
 
 import pickle
-import zlib
 
 import numpy as np
 import zmq
@@ -128,12 +127,10 @@ class ModelPublisher:
     def publish(self, tflite_path: str, step: int):
         with open(tflite_path, 'rb') as f:
             model_bytes = f.read()
-        compressed = zlib.compress(model_bytes, level=1)  # level=1: fast, ~50% smaller
-        payload = pickle.dumps({'model_bytes': compressed, 'step': step, 'compressed': True})
+        payload = pickle.dumps({'model_bytes': model_bytes, 'step': step})
         try:
             self.sock.send(payload)
-            print(f'[Comms] Published model — step {step}, '
-                  f'{len(model_bytes)//1024} KB → {len(compressed)//1024} KB compressed')
+            print(f'[Comms] Published model — step {step}, {len(model_bytes)//1024} KB')
         except zmq.Again:
             print(f'[Comms] WARNING: model publish timed out — '
                   f'car not connected on port {MODEL_PORT}? Skipping.')
@@ -154,9 +151,6 @@ class ModelSubscriber:
     def poll(self) -> dict | None:
         """Returns dict with model_bytes + step if available, else None."""
         try:
-            data = pickle.loads(self.sock.recv(zmq.NOBLOCK))
-            if data.get('compressed'):
-                data['model_bytes'] = zlib.decompress(data['model_bytes'])
-            return data
+            return pickle.loads(self.sock.recv(zmq.NOBLOCK))
         except zmq.Again:
             return None
