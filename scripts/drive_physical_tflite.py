@@ -128,7 +128,7 @@ class DreamerTFLite:
 # ZMQ comms (optional — only active when --server_ip is set)
 # ---------------------------------------------------------------------------
 
-from dreamer.comms import make_comms, MODEL_PORT
+from dreamer.comms import make_comms, MODEL_HTTP_PORT as MODEL_PORT
 
 
 # ---------------------------------------------------------------------------
