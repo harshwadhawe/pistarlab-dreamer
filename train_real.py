@@ -53,6 +53,7 @@ parser.set_defaults(
     grayscale=False,      # RGB by default; pass --grayscale to match a grayscale car
     augment=True,         # sim-to-real augmentations on by default for real world
     expl_amount=0.0,      # TFLite runs deterministic
+    experience_size=50000,  # ~230 MB for RGB; sim default (1M) is too large for real-world runs
 )
 
 # Server-specific
