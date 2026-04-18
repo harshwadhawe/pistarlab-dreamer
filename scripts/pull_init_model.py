@@ -1,8 +1,8 @@
 """
 Download both inference_rgb.tflite and inference_grayscale.tflite from the server.
 
-Run on the PI once. After this, drive_physical_tflite.py auto-selects the
-correct model based on --grayscale flag — no init scripts needed on future runs.
+Run on the Pi once. After this, train_real_pi.py auto-selects the
+correct model based on config.toml [pi] grayscale setting — no init scripts needed on future runs.
 
 Usage:
   python scripts/pull_init_model.py --server_ip 192.168.0.103
@@ -36,4 +36,4 @@ for label in ('rgb', 'grayscale'):
         print(f'[Init] Failed to download {label}: {e}')
         sys.exit(1)
 
-print('\n[Init] Done. You can now Ctrl+C the server and start train_real.py.')
+print('\n[Init] Done. You can now Ctrl+C the server and start train_real_server.py.')

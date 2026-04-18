@@ -132,7 +132,10 @@ def build_models(channels, belief_size, state_size, action_size,
 def export(checkpoint_path, output_path, channels, belief_size, state_size,
            action_size, embedding_size, hidden_size, fix_speed, throttle_base):
 
-    print(f'Loading checkpoint: {checkpoint_path}')
+    print(f'\n{"─"*52}')
+    print(f'[TFLite] Exporting checkpoint → {output_path}')
+    print(f'[TFLite] channels={channels}  belief={belief_size}  state={state_size}')
+    print(f'{"─"*52}')
     ckpt = torch.load(checkpoint_path, map_location='cpu')
 
     encoder, transition, actor = build_models(
@@ -157,14 +160,13 @@ def export(checkpoint_path, output_path, channels, belief_size, state_size,
     with torch.no_grad():
         edge_model = litert_torch.convert(graph, dummy)
 
+    import os
     edge_model.export(output_path)
-    print(f'Exported → {output_path}')
+    size_kb = os.path.getsize(output_path) // 1024
+    print(f'[TFLite] Exported → {output_path}  ({size_kb} KB)')
 
-    # Quick shape check
     action_out, belief_out, state_out = graph(*dummy)
-    print(f'  action:     {tuple(action_out.shape)}')
-    print(f'  new_belief: {tuple(belief_out.shape)}')
-    print(f'  new_state:  {tuple(state_out.shape)}')
+    print(f'[TFLite] Output shapes — action:{tuple(action_out.shape)}  belief:{tuple(belief_out.shape)}  state:{tuple(state_out.shape)}')
 
 
 if __name__ == '__main__':

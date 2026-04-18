@@ -1,0 +1,169 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dreamer Config
+# Edit this file to change training settings.
+# Sim uses [common] + [sim]. Real uses [common] + [real].
+# [real] and [sim] keys override [common] when they share a name.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[common]
+
+# ── Architecture ──────────────────────────────────────────────────────────────
+embedding_size        = 1024
+hidden_size           = 300
+belief_size           = 200
+state_size            = 30
+action_size           = 2
+cnn_act               = "relu"
+dense_act             = "elu"
+
+# ── World model ───────────────────────────────────────────────────────────────
+free_nats             = 1.0
+reward_scale          = 10
+pcont                 = false
+pcont_scale           = 10
+
+# ── Training ──────────────────────────────────────────────────────────────────
+seed_episodes         = 5
+collect_interval      = 100
+batch_size            = 50
+chunk_size            = 50
+world_lr              = 6e-4
+actor_lr              = 8e-5
+value_lr              = 8e-5
+adam_epsilon          = 1e-7
+grad_clip_norm        = 100.0
+learning_rate_schedule = 0
+
+# ── Policy ────────────────────────────────────────────────────────────────────
+planning_horizon      = 15
+discount              = 0.99
+disclam               = 0.95
+polyak                = 0.005
+expl_amount           = 0.15
+with_logprob          = false
+auto_temp             = false
+temp                  = 0.003
+kl_balance            = true
+symlog_rewards        = true
+return_norm           = true
+
+# ── DonkeyCar action constraints ─────────────────────────────────────────────
+fix_speed             = true
+throttle_base         = 0.3
+throttle_min          = 0.1
+throttle_max          = 0.5
+angle_min             = -1.0
+angle_max             = 1.0
+
+# ── Observation ───────────────────────────────────────────────────────────────
+grayscale             = false   # true → 1-channel, false → 3-channel RGB
+
+# ── Reproducibility ───────────────────────────────────────────────────────────
+seed                  = 42
+disable_cuda          = false
+
+# ── Resume (leave empty to start fresh) ──────────────────────────────────────
+models            = ""
+experience_replay = ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+[sim]
+# ─────────────────────────────────────────────────────────────────────────────
+
+env                   = "donkey-generated-track-v0"
+episodes              = 1000
+experience_size       = 1000000
+max_episode_length    = 1000
+
+# Simulator connection
+sim_path              = "self"      # "self" = manually launched sim
+host                  = "127.0.0.1"
+port                  = 9091
+
+# Human override (keyboard controls episode outcome)
+human_override        = true
+smooth_weight         = 0.1         # steering jitter penalty (0 = off)
+smooth_window         = 10          # rolling window for std dev
+
+# Augmentation
+augment               = false
+
+# Evaluation
+test                  = false
+test_interval         = 5
+test_episodes         = 1
+
+# Checkpointing
+checkpoint_interval   = 500
+checkpoint_experience = false
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+[automated]
+# train_sim_automated.py — headless ablation experiments, no keyboard needed
+# ─────────────────────────────────────────────────────────────────────────────
+
+env                   = "donkey-generated-track-v0"
+episodes              = 20
+experience_size       = 100000
+max_episode_length    = 1000
+
+sim_path              = "self"
+host                  = "127.0.0.1"
+port                  = 9091
+
+smooth_weight         = 0.0
+smooth_window         = 10
+augment               = false
+
+# ── Experiment identity ───────────────────────────────────────────────────────
+experiment_name       = "baseline"   # saved as rewards_{experiment_name}.csv
+seed                  = 1            # change per run: 1, 2, 3
+
+# ── Ablation flags — flip ONE at a time ──────────────────────────────────────
+kl_balance            = true
+symlog_rewards        = true
+return_norm           = true
+
+# Evaluation
+test_interval         = 5
+test_episodes         = 1
+
+# Checkpointing
+checkpoint_interval   = 10
+checkpoint_experience = false
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+[real]
+# train_real_server.py — runs on Mac/Linux
+# ─────────────────────────────────────────────────────────────────────────────
+
+episodes              = 500
+experience_size       = 50000       # ~230 MB for RGB
+results_dir           = "results/real"
+
+# Augmentation on by default for sim-to-real transfer
+augment               = true
+expl_amount           = 0.0         # TFLite inference is deterministic
+
+# Car communication
+bind_ip               = "*"         # bind to all interfaces
+
+# Model/checkpoint cadence
+push_interval         = 1           # export + push TFLite every N episodes
+checkpoint_interval   = 50
+smooth_weight         = 0.1
+smooth_window         = 10
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+[pi]
+# train_real_pi.py — runs on Pi5
+# Edit server_ip before each session.
+# ─────────────────────────────────────────────────────────────────────────────
+
+server_ip             = "192.168.0.103"   # Mac IP — run `ipconfig getifaddr en0`
+model                 = ""                # leave empty to auto-select from models/
+max_episode_steps     = 1000              # auto-end episode after N steps (~8s at 60fps)

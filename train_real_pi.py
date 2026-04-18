@@ -1,48 +1,25 @@
 """
-Run the Dreamer inference loop on the physical DonkeyCar using a fused TFLite model.
+Pi5 inference + experience collection loop for real-world DonkeyCar.
 
-The TFLite model takes:
-  obs [1,C,64,64], prev_belief [1,200], prev_state [1,30], prev_action [1,2]
-and returns:
-  action [1,2], new_belief [1,200], new_state [1,30]
-
-Belief and state carry across steps and reset at each episode boundary.
-
-With --server_ip set, the car also:
-  - Sends each completed episode to the server trainer via ZMQ PUSH
-  - Polls for updated TFLite weights and hot-reloads them mid-run
-
-Without --server_ip, runs as a standalone inference loop (no comms).
-
-Run on Pi5 (no PyTorch needed):
-  pip install tflite-runtime numpy opencv-python pyzmq donkeycar
+All settings are in config.toml [pi] section.
+Edit server_ip in config.toml before each session.
 
 Usage:
-  # Standalone inference (no server):
-  python drive_physical_tflite.py --model inference.tflite
-
-  # Connected to server trainer:
-  python drive_physical_tflite.py --model inference.tflite --server_ip 192.168.1.100
-
-  # RGB model:
-  python drive_physical_tflite.py --model inference.tflite --server_ip 192.168.1.100 --channels 3
+  python train_real_pi.py
 """
 
-import argparse
 import os
-import sys
 import time
-
-# Ensure repo root is on path when running as scripts/drive_physical_tflite.py
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-
 import warnings
+
 import numpy as np
 import tflite_runtime.interpreter as tflite
 
 warnings.filterwarnings('ignore', category=DeprecationWarning)
 
+from dreamer.config import load_config
 from dreamer.utils.obs import preprocess_frame
+from dreamer.comms import make_comms, MODEL_HTTP_PORT as MODEL_PORT
 from donkeycar.parts.actuator import PCA9685
 from donkeycar.parts.camera import PiCamera
 
@@ -57,7 +34,6 @@ THROTTLE_FORWARD_PWM = 480
 THROTTLE_STOPPED_PWM = 400
 THROTTLE_REVERSE_PWM = 320
 
-# --- Tuning ---
 STEERING_GAIN  = 1.0
 THROTTLE_BOOST = 1.0
 
@@ -81,13 +57,10 @@ class DreamerTFLite:
     def _load(self, path):
         self.interp = tflite.Interpreter(model_path=path)
         self.interp.allocate_tensors()
-        # litert_torch generates generic names (serving_default_args_N:0).
-        # Map by shape instead — each tensor has a unique shape.
         self._inp = self._map_by_shape(self.interp.get_input_details())
         self._out = self._map_by_shape(self.interp.get_output_details())
 
     def _map_by_shape(self, details):
-        """Return dict keyed by tuple(shape) → tensor index."""
         return {tuple(d['shape'].tolist()): d['index'] for d in details}
 
     def _idx_in(self, shape):
@@ -112,23 +85,15 @@ class DreamerTFLite:
         self.action = self.interp.get_tensor(self._idx_out([1, self.action_size]))
         self.belief = self.interp.get_tensor(self._idx_out([1, self.belief_size]))
         self.state  = self.interp.get_tensor(self._idx_out([1, self.state_size]))
-        return self.action[0]   # [2]: [steering, throttle]
+        return self.action[0]
 
     def reload(self, model_bytes: bytes):
-        """Hot-reload weights without restarting the control loop."""
         tmp = 'models/inference_active.tflite'
         os.makedirs('models', exist_ok=True)
         with open(tmp, 'wb') as f:
             f.write(model_bytes)
         self._load(tmp)
-        print('[Model] Hot-reloaded.')
-
-
-# ---------------------------------------------------------------------------
-# ZMQ comms (optional — only active when --server_ip is set)
-# ---------------------------------------------------------------------------
-
-from dreamer.comms import make_comms, MODEL_HTTP_PORT as MODEL_PORT
+        print('[Pi] New model loaded and active.')
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +115,12 @@ class PhysicalDreamerCar:
         self.camera        = None
 
         try:
-            print('[INFO] Loading TFLite model...')
+            model_path = args.model or (
+                f'models/inference_{"grayscale" if args.grayscale else "rgb"}.tflite'
+            )
+            print(f'[INFO] Loading TFLite model: {model_path}')
             self.model = DreamerTFLite(
-                model_path=args.model,
+                model_path=model_path,
                 belief_size=args.belief_size,
                 state_size=args.state_size,
                 action_size=2,
@@ -177,7 +145,7 @@ class PhysicalDreamerCar:
         except Exception as e:
             print(f'\n[FATAL] Init failed: {e}')
             self.shutdown()
-            sys.exit(1)
+            raise SystemExit(1)
 
     def preprocess(self, frame):
         return preprocess_frame(frame, self.args.channels)
@@ -221,8 +189,6 @@ class PhysicalDreamerCar:
                     obs    = self.preprocess(frame)
                     action = self.model.step(obs)
 
-                    # Seed episodes: override steering with uniform random [-1, 1]
-                    # held for ~0.5s so the car actually moves before switching.
                     if episode_num <= self.args.seed_episodes:
                         if not hasattr(self, '_seed_steer') or \
                                 time.time() - self._seed_steer_t >= 0.5:
@@ -244,7 +210,7 @@ class PhysicalDreamerCar:
                         break
 
                     if len(rew_buf) >= self.args.max_episode_steps:
-                        reward, done = 1.0, True   # clean timeout — full reward
+                        reward, done = 1.0, True
 
                     obs_buf.append(obs.copy())
                     act_buf.append(action.copy())
@@ -287,9 +253,6 @@ class PhysicalDreamerCar:
             if self.ps4.should_quit:
                 break
 
-            # Halt until server pushes a new model (blocks during training).
-            # During seed episodes: skip halt so car runs freely like sim.
-            # Keeps motors zeroed. Noop when running standalone.
             if self.args.server_ip and episode_num > self.args.seed_episodes:
                 print('[Car] Waiting for server to finish training + export...')
                 wait_start = time.time()
@@ -313,7 +276,7 @@ class PhysicalDreamerCar:
                         break
                     time.sleep(0.05)
 
-            # Wait for R1 before starting next episode
+            self.ps4.flush()
             print('[Car] Press R1 to start next episode...')
             while True:
                 self.send_zero()
@@ -342,28 +305,6 @@ class PhysicalDreamerCar:
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model',        default='',
-                        help='Path to .tflite model. Auto-selected from inference_rgb.tflite '
-                             'or inference_grayscale.tflite unless specified.')
-    parser.add_argument('--server_ip',    type=str,  default='',
-                        help='Server IP/hostname. Omit for standalone mode.')
-    parser.add_argument('--grayscale',    action='store_true', default=False,
-                        help='Use 1-channel grayscale model. Default: RGB.')
-    parser.add_argument('--belief-size',  type=int,  default=200)
-    parser.add_argument('--state-size',   type=int,  default=30)
-    parser.add_argument('--max-episode-steps', type=int, default=500,
-                        help='Auto-end episode after this many steps (default 500 ≈ 8s)')
-    parser.add_argument('--seed-episodes', type=int, default=5,
-                        help='Run this many episodes freely before halting for model updates')
-    args = parser.parse_args()
-
-    args.channels = 1 if args.grayscale else 3
-
-    if not args.model:
-        label      = 'grayscale' if args.grayscale else 'rgb'
-        args.model = f'models/inference_{label}.tflite'
-    print(f'[Init] Using model: {args.model} (channels={args.channels})')
-
+    args = load_config('pi')
     car = PhysicalDreamerCar(args)
     car.run()

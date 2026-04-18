@@ -1,31 +1,15 @@
 """
 Server-side Dreamer trainer for real-world DonkeyCar.
 
-Receives experience from the Pi5 car via ZMQ, trains the world model +
+Receives experience from the Pi5 via ZMQ, trains the world model +
 actor + critic, exports a fused TFLite model, and pushes it back to the car.
 
-Backwards compatible with sim: accepts the same --models checkpoint format
-produced by train_sim.py, and uses the identical Dreamer agent + hyperparameters.
-train_sim.py (sim) is unchanged — this script is the real-world parallel.
-
-Setup (server, donkeycar-dreamer conda env):
-  pip install pyzmq
-
-TFLite export runs in a subprocess using the same donkeycar-dreamer conda env
-(litert_torch is installed there). --litert_env defaults to donkeycar-dreamer.
+All settings are in config.toml [real] section.
 
 Usage:
-  # Bootstrap from sim checkpoint, then train on real car data:
-  python server_trainer.py --models results/donkey-generated-roads-v0/1/models_500.pth
-
-  # Train from scratch (random init):
-  python server_trainer.py --episodes 500
-
-  # Tune push interval and buffer warmup:
-  python server_trainer.py --models models_500.pth --push_interval 2 --min_buffer_steps 1000
+  python train_real_server.py
 """
 
-import argparse
 import csv
 import os
 import subprocess
@@ -35,40 +19,12 @@ from datetime import datetime
 import numpy as np
 import torch
 
-from dreamer.config import add_common_args
+from dreamer.config import load_config
 from dreamer.agent import Dreamer
 from dreamer.comms import ExperienceReceiver, ModelPublisher, MODEL_HTTP_PORT
 from dreamer.utils import setup_device
 
-# ---------------------------------------------------------------------------
-# Args — shared defaults + server-specific additions
-# ---------------------------------------------------------------------------
-parser = argparse.ArgumentParser(description='Dreamer — real-world server trainer')
-
-add_common_args(parser)
-
-# Override defaults that differ for real-world server
-parser.set_defaults(
-    episodes=500,
-    grayscale=False,      # RGB by default; pass --grayscale to match a grayscale car
-    augment=True,         # sim-to-real augmentations on by default for real world
-    expl_amount=0.0,      # TFLite runs deterministic
-    experience_size=50000,  # ~230 MB for RGB; sim default (1M) is too large for real-world runs
-)
-
-# Server-specific
-parser.add_argument('--bind_ip',           type=str, default='*',
-                    help='IP to bind sockets (default: all interfaces)')
-parser.add_argument('--push_interval',     type=int, default=1,
-                    help='Export + push TFLite to car every N episodes')
-parser.add_argument('--checkpoint_interval', type=int, default=50,
-                    help='Save .pth checkpoint every N episodes')
-parser.add_argument('--results-dir',       type=str, default='results/real')
-
-args = parser.parse_args()
-args.channels = 1 if args.grayscale else 3
-args.observation_size = (args.channels, 64, 64)
-args.smooth_weight = 0.0
+args = load_config('real')
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -107,18 +63,15 @@ if args.models and os.path.exists(args.models):
     print(f'[Server] Bootstrapped from sim checkpoint: {args.models}')
 
 # ---------------------------------------------------------------------------
-# ZMQ
+# Comms
 # ---------------------------------------------------------------------------
 receiver  = ExperienceReceiver(bind_ip=args.bind_ip)
 publisher = ModelPublisher(bind_ip=args.bind_ip)
 
 # ---------------------------------------------------------------------------
-# TFLite export (runs in litert conda env to avoid conflicts)
+# TFLite export
 # ---------------------------------------------------------------------------
 def export_and_publish(episode_count: int) -> None:
-    """Export TFLite synchronously (blocking) then publish. Car is halted
-    waiting for this — running inline ensures training always finishes
-    before the car receives new weights."""
     tflite_path = os.path.join(args.results_dir, f'inference_{episode_count}.tflite')
     ckpt_path   = os.path.join(args.results_dir, f'export_weights_{episode_count}.pth')
 
@@ -145,9 +98,8 @@ def export_and_publish(episode_count: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Checkpoint
+# Checkpoint helpers
 # ---------------------------------------------------------------------------
-
 def save_checkpoint(episode_count: int) -> None:
     path = os.path.join(args.results_dir, f'models_{episode_count}.pth')
     agent.save_checkpoint(path)
@@ -172,15 +124,14 @@ while episode_count < args.episodes:
     print(f'[Server] Waiting for episode {episode_count + 1}/{args.episodes}...')
     ep = receiver.recv()
 
-    # Car discarded the episode — no experience to train on; just unblock the loop.
     if ep.get('discarded', False):
         print(f'[Server] Episode {ep.get("episode_num", "?")} discarded by operator — skipping.')
         continue
 
-    obs     = ep['obs']       # [T, C, 64, 64]  float32
-    actions = ep['actions']   # [T, action_size] float32
-    rewards = ep['rewards']   # [T]              float32
-    dones   = ep['dones']     # [T]              bool
+    obs     = ep['obs']
+    actions = ep['actions']
+    rewards = ep['rewards']
+    dones   = ep['dones']
     T       = len(rewards)
 
     agent.append_episode(obs, actions, rewards, dones)
@@ -191,11 +142,9 @@ while episode_count < args.episodes:
           f'steps {T:>4d} | reward {total_reward:>7.2f} | '
           f'buffer {agent.D.steps:>7d} steps')
 
-    loss_info = None
     if episode_count > args.seed_episodes:
-        grad_steps = args.collect_interval
-        print(f'[Server] Training {grad_steps} gradient steps...')
-        loss_info = agent.update_parameters(grad_steps)
+        print(f'[Server] Training {args.collect_interval} gradient steps...')
+        loss_info = agent.update_parameters(args.collect_interval)
         losses = np.mean(loss_info, axis=0)
         obs_l, rew_l, kl_l, _, act_l, val_l = losses
         print(f'[Server] obs={obs_l:.4f} rew={rew_l:.4f} kl={kl_l:.4f} '
@@ -211,9 +160,6 @@ while episode_count < args.episodes:
     ])
     csv_file.flush()
 
-    # After last seed episode: push initial weights to unblock the car.
-    # Post-seed: always export+publish so the car is never left waiting.
-    # Reconstruction images are saved every push_interval episodes only.
     if episode_count == args.seed_episodes:
         print('[Server] Seed phase complete — pushing initial model to car...')
         export_and_publish(episode_count)
@@ -225,7 +171,6 @@ while episode_count < args.episodes:
     if episode_count % args.checkpoint_interval == 0:
         save_checkpoint(episode_count)
 
-# Final checkpoint
 save_checkpoint(episode_count)
 csv_file.close()
 print(f'\n[Server] Training complete — {episode_count} episodes.')

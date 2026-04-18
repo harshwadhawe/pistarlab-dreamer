@@ -3,7 +3,7 @@ Export both RGB and grayscale TFLite models and serve them to the Pi via HTTP.
 
 Run on the SERVER once. The Pi runs pull_init_model.py simultaneously.
 After this, the Pi has models/inference_rgb.tflite and models/inference_grayscale.tflite
-and never needs to run init scripts again — drive_physical_tflite.py auto-selects.
+and never needs to run init scripts again — train_real_pi.py auto-selects.
 
 Usage:
   # Random init (first run, no checkpoint):

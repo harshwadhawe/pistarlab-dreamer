@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-from .envs.env import postprocess_observation, preprocess_observation_
 
 
 class ExperienceReplay:
@@ -10,14 +9,10 @@ class ExperienceReplay:
     sample() returns contiguous chunks of shape [chunk, batch, ...].
     """
 
-    def __init__(self, size, symbolic_env, observation_size, action_size, bit_depth, device):
+    def __init__(self, size, observation_size, action_size, device):
         self.device = device
-        self.symbolic_env = symbolic_env
         self.size = size
-        self.observations = np.empty(
-            (size, observation_size) if symbolic_env else (size, *observation_size),
-            dtype=np.float32,
-        )
+        self.observations = np.empty((size, *observation_size), dtype=np.float32)
         self.actions = np.empty((size, action_size), dtype=np.float32)
         self.rewards = np.empty((size,), dtype=np.float32)
         self.nonterminals = np.empty((size,), dtype=np.float32)
@@ -25,7 +20,6 @@ class ExperienceReplay:
         self.full = False
         self.steps = 0
         self.episodes = 0
-        self.bit_depth = bit_depth
 
     def snapshot(self):
         """Return a lightweight checkpoint of buffer pointers (not data)."""

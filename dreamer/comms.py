@@ -163,7 +163,7 @@ class ModelPublisher:
         with self._lock:
             self._server._model_bytes = model_bytes
             self._server._step        = step
-        print(f'[Comms] Model ready — step {step}, {len(model_bytes) // 1024} KB')
+        print(f'[Server → Pi] Model served — step {step}  {len(model_bytes) // 1024} KB  (Pi will download on next poll)')
 
 
 class ModelClient:
@@ -216,8 +216,8 @@ class ModelClient:
             with self._lock:
                 self._pending   = {'model_bytes': model_bytes, 'step': step}
                 self._last_step = step
-            print(f'\n[Comms] Model downloaded — step {step}, {len(model_bytes) // 1024} KB')
+            print(f'\n[Pi ← Server] Model received — step {step}  {len(model_bytes) // 1024} KB')
         except Exception as e:
-            print(f'\n[Comms] Model download failed: {e}')
+            print(f'\n[Pi ← Server] Model download failed: {e}')
         finally:
             self._downloading = False

@@ -1,8 +1,6 @@
-import contextlib
 import os
 from copy import deepcopy
 
-import cv2
 import numpy as np
 import torch
 from torch import nn, optim
@@ -41,9 +39,8 @@ class Dreamer:
         ).to(device=args.device)
 
         self.observation_model = ObservationModel(
-            args.symbolic, args.observation_size,
-            args.belief_size, args.state_size, args.embedding_size,
-            activation_function=(args.dense_act if args.symbolic else args.cnn_act),
+            args.observation_size,
+            args.belief_size, args.state_size, args.embedding_size, args.cnn_act,
         ).to(device=args.device)
 
         self.reward_model = RewardModel(
@@ -51,7 +48,7 @@ class Dreamer:
         ).to(device=args.device)
 
         self.encoder = Encoder(
-            args.symbolic, args.observation_size, args.embedding_size, args.cnn_act,
+            args.observation_size, args.embedding_size, args.cnn_act,
         ).to(device=args.device)
 
         self.actor_model = ActorModel(
@@ -98,32 +95,22 @@ class Dreamer:
 
         self.free_nats = torch.full((1,), args.free_nats, dtype=torch.float32, device=args.device)
 
-        # Mixed-precision: GradScaler only on CUDA (MPS uses bfloat16 without scaling)
-        self._use_fp16 = getattr(args, 'fp16', False)
-        self._scaler   = torch.amp.GradScaler('cuda') if (self._use_fp16 and str(args.device).startswith('cuda')) else None
-
         self.D = ExperienceReplay(
-            args.experience_size, args.symbolic, args.observation_size,
-            args.action_size, args.bit_depth, args.device,
+            args.experience_size, args.observation_size,
+            args.action_size, args.device,
         )
 
         self.augmenter = Augmenter(device=args.device) if args.augment else None
 
-        if self.args.auto_temp:
-            self.log_temp = torch.zeros(1, requires_grad=True, device=args.device)
-            self.target_entropy = -np.prod(
-                args.action_size if not args.fix_speed else self.args.action_size - 1
-            ).item()
-            self.temp_optimizer = optim.Adam([self.log_temp], lr=args.value_lr)
+        world_params  = sum(np.prod(p.shape) for p in self.world_param)
+        actor_params  = sum(np.prod(p.shape) for p in self.actor_model.parameters())
+        value_params  = sum(np.prod(p.shape) for p in self.value_model.parameters())
+        print(f'[Agent] Model created — world {world_params/1e6:.2f}M  actor {actor_params/1e6:.2f}M  value {value_params/1e6:.2f}M  device={args.device}')
 
         # Return normalisation EMAs (Dreamer v3)
         self._ret_ema_low = 1.0
         self._ret_ema_high = 1.0
         self._norm_step = 0
-
-    def process_im(self, images, image_size=64, rgb=None):
-        from .envs.env import _images_to_observation
-        return _images_to_observation(images, self.args.bit_depth)
 
     def append_buffer(self, new_traj):
         for observation, action, reward, done in new_traj:
@@ -141,7 +128,7 @@ class Dreamer:
             bottle(self.observation_model, (beliefs, posterior_states)),
             observations,
             reduction='none',
-        ).sum(dim=2 if self.args.symbolic else (2, 3, 4)).mean(dim=(0, 1))
+        ).sum(dim=(2, 3, 4)).mean(dim=(0, 1))
 
         reward_target = symlog(rewards) if self.args.symlog_rewards else rewards
         reward_loss = F.mse_loss(
@@ -297,54 +284,32 @@ class Dreamer:
     # Main training loop
     # ------------------------------------------------------------------
 
-    def _autocast(self):
-        """Return the appropriate autocast context for the current device.
-
-        MPS autocast is intentionally disabled — bfloat16 backward through
-        TorchScript ops raises dtype mismatch errors on Apple Silicon.
-        """
-        if not self._use_fp16:
-            return contextlib.nullcontext()
-        dev = str(self.args.device)
-        if dev.startswith('cuda'):
-            return torch.autocast(device_type='cuda', dtype=torch.float16)
-        return contextlib.nullcontext()
-
     def _opt_step(self, loss, optimizer, params_for_clip):
-        """backward → grad-clip → optimizer step, with GradScaler on CUDA."""
-        if self._scaler is not None:
-            self._scaler.scale(loss).backward()
-            self._scaler.unscale_(optimizer)
-            nn.utils.clip_grad_norm_(params_for_clip, self.args.grad_clip_norm, norm_type=2)
-            self._scaler.step(optimizer)
-            self._scaler.update()
-        else:
-            loss.backward()
-            nn.utils.clip_grad_norm_(params_for_clip, self.args.grad_clip_norm, norm_type=2)
-            optimizer.step()
+        loss.backward()
+        nn.utils.clip_grad_norm_(params_for_clip, self.args.grad_clip_norm, norm_type=2)
+        optimizer.step()
 
     def update_parameters(self, gradient_steps):
         loss_info = []
         for _ in tqdm(range(gradient_steps)):
             observations, actions, rewards, nonterminals = self.D.sample(self.args.batch_size, self.args.chunk_size)
 
-            if self.augmenter is not None and not self.args.symbolic:
+            if self.augmenter is not None:
                 observations = self.augmenter(observations)
 
             init_belief = torch.zeros(self.args.batch_size, self.args.belief_size, device=self.args.device)
             init_state = torch.zeros(self.args.batch_size, self.args.state_size, device=self.args.device)
 
-            with self._autocast():
-                beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs = self.transition_model(
-                    init_state, actions, init_belief,
-                    bottle(self.encoder, (observations,)), nonterminals,
-                )
+            beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs = self.transition_model(
+                init_state, actions, init_belief,
+                bottle(self.encoder, (observations,)), nonterminals,
+            )
 
-                # --- World model update ---
-                world_model_loss = self._compute_loss_world(
-                    state=(beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs),
-                    data=(observations, rewards, nonterminals),
-                )
+            # --- World model update ---
+            world_model_loss = self._compute_loss_world(
+                state=(beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs),
+                data=(observations, rewards, nonterminals),
+            )
             observation_loss, reward_loss, kl_loss, pcont_loss = world_model_loss
             self.world_optimizer.zero_grad()
             self._opt_step(observation_loss + reward_loss + kl_loss + pcont_loss,
@@ -359,22 +324,12 @@ class Dreamer:
                 p.requires_grad = False
 
             # --- Latent imagination ---
-            with self._autocast():
-                imag_beliefs, imag_states, imag_ac_logps = self._latent_imagination(
-                    beliefs, posterior_states, with_logprob=self.args.with_logprob
-                )
-
-            # --- Temperature update (auto_temp) ---
-            if self.args.auto_temp:
-                temp_loss = -(self.log_temp * (imag_ac_logps + self.target_entropy).detach()).mean()
-                self.temp_optimizer.zero_grad()
-                temp_loss.backward()
-                self.temp_optimizer.step()
-                self.args.temp = self.log_temp.exp()
+            imag_beliefs, imag_states, imag_ac_logps = self._latent_imagination(
+                beliefs, posterior_states, with_logprob=self.args.with_logprob
+            )
 
             # --- Actor update ---
-            with self._autocast():
-                actor_loss = self._compute_loss_actor(imag_beliefs, imag_states, imag_ac_logps=imag_ac_logps)
+            actor_loss = self._compute_loss_actor(imag_beliefs, imag_states, imag_ac_logps=imag_ac_logps)
             self.actor_optimizer.zero_grad()
             self._opt_step(actor_loss, self.actor_optimizer, self.actor_model.parameters())
 
@@ -389,8 +344,7 @@ class Dreamer:
             # --- Critic update ---
             imag_beliefs = imag_beliefs.detach()
             imag_states = imag_states.detach()
-            with self._autocast():
-                critic_loss = self._compute_loss_critic(imag_beliefs, imag_states, imag_ac_logps=imag_ac_logps)
+            critic_loss = self._compute_loss_critic(imag_beliefs, imag_states, imag_ac_logps=imag_ac_logps)
             self.value_optimizer.zero_grad()
             self._opt_step(critic_loss, self.value_optimizer,
                            list(self.value_model.parameters()) + list(self.value_model2.parameters()))

@@ -1,7 +1,7 @@
 from .world_model import (
     TransitionModel,
-    Encoder, VisualEncoder, SymbolicEncoder,
-    ObservationModel, VisualObservationModel, SymbolicObservationModel,
+    Encoder, VisualEncoder,
+    ObservationModel, VisualObservationModel,
     RewardModel,
     PCONTModel,
 )

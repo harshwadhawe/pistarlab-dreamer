@@ -14,7 +14,8 @@ Usage:
 
 event_to_outcome reward table:
   STOP    → -1.0  (off track, penalise)
-  RESET   → +1.0  (clean lap, same as a survived step)
+  RESET   → +1.0  (clean lap)
+  GREAT   → +2.0  (excellent lap — extra reward signal)
   DISCARD →  0.0  (episode erased — steps never reach trainer)
   START   →  1.0  (no-event, survived step — START is consumed at episode boundary)
   None    → +1.0  (no event, survived step)
@@ -27,6 +28,7 @@ import threading
 class EpisodeController:
     STOP    = 'stop'
     RESET   = 'reset'
+    GREAT   = 'great'
     DISCARD = 'discard'
     START   = 'start'
 
@@ -44,6 +46,14 @@ class EpisodeController:
         except queue.Empty:
             return None
 
+    def flush(self):
+        """Discard all queued events (e.g. accidental presses during training)."""
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+
     @staticmethod
     def event_to_outcome(ev):
         """Map an override event → (reward, terminated, discard_requested)."""
@@ -51,6 +61,8 @@ class EpisodeController:
             return -1.0, True,  False
         if ev == EpisodeController.RESET:
             return  1.0, True,  False
+        if ev == EpisodeController.GREAT:
+            return  2.0, True,  False
         if ev == EpisodeController.DISCARD:
             return  0.0, True,  True
         return 1.0, False, False  # None or START — survived step
@@ -90,7 +102,8 @@ class EpisodeController:
 class KeyboardBackend:
     """
     Arrow key bindings:
-      ↑ Up    → RESET
+      ↑ Up    → RESET  (+1, clean lap)
+      =       → GREAT  (+2, excellent lap)
       ↓ Down  → DISCARD
       ← Left  → STOP
       → Right → START
@@ -105,9 +118,10 @@ class KeyboardBackend:
         self._start_listener()
         print('\n' + '─' * 50)
         print('  Episode Controller — Keyboard')
-        print('    ↑ Up    →  RESET   (clean lap, +1)')
+        print('    ↑ Up    →  RESET   (clean lap,     +1)')
+        print('    =       →  GREAT   (excellent lap, +2)')
         print('    ↓ Down  →  DISCARD (erase episode)')
-        print('    ← Left  →  STOP    (off-track, -1)')
+        print('    ← Left  →  STOP    (off-track,     -1)')
         print('    → Right →  START   (begin next episode)')
         print('  Ctrl+C to stop training.')
         print('─' * 50 + '\n')
@@ -119,6 +133,9 @@ class KeyboardBackend:
             if key == keyboard.Key.up:
                 self._ctrl._push(EpisodeController.RESET)
                 print('\r[Ctrl] RESET   ')
+            elif hasattr(key, 'char') and key.char == '=':
+                self._ctrl._push(EpisodeController.GREAT)
+                print('\r[Ctrl] GREAT   ')
             elif key == keyboard.Key.down:
                 self._ctrl._push(EpisodeController.DISCARD)
                 print('\r[Ctrl] DISCARD ')
@@ -142,19 +159,21 @@ class KeyboardBackend:
 # Gamepad backend — evdev, PS4 / DualSense (Pi5 only)
 # ---------------------------------------------------------------------------
 
-_BTN_CIRCLE = 305   # ○
-_BTN_CROSS  = 304   # ×
-_BTN_SQUARE = 308   # □
-_BTN_R1     = 311   # R1
+_BTN_CIRCLE   = 305   # ○
+_BTN_CROSS    = 304   # ×
+_BTN_SQUARE   = 308   # □
+_BTN_TRIANGLE = 307   # △
+_BTN_R1       = 311   # R1
 
 
 class GamepadBackend:
     """
     PS4 button bindings:
-      ○ Circle → STOP
-      × Cross  → RESET
-      □ Square → DISCARD
-      R1       → START
+      ○ Circle   → STOP
+      × Cross    → RESET
+      △ Triangle → GREAT  (+2, excellent lap)
+      □ Square   → DISCARD
+      R1         → START
     """
 
     def __init__(self):
@@ -171,7 +190,7 @@ class GamepadBackend:
                 'Check it is paired and user is in the input group.'
             )
         print(f'[Ctrl] Found: {dev.name} ({dev.path})')
-        print('[Ctrl] ○=STOP  ×=RESET  □=DISCARD  R1=START')
+        print('[Ctrl] ○=STOP  ×=RESET  △=GREAT(+2)  □=DISCARD  R1=START')
 
         t = threading.Thread(target=self._poll_loop, args=(dev,), daemon=True)
         t.start()
@@ -201,6 +220,9 @@ class GamepadBackend:
                 elif key.scancode == _BTN_CROSS:
                     self._ctrl._push(EpisodeController.RESET)
                     print('\r[Ctrl] RESET   ')
+                elif key.scancode == _BTN_TRIANGLE:
+                    self._ctrl._push(EpisodeController.GREAT)
+                    print('\r[Ctrl] GREAT   ')
                 elif key.scancode == _BTN_SQUARE:
                     self._ctrl._push(EpisodeController.DISCARD)
                     print('\r[Ctrl] DISCARD ')
