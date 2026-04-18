@@ -1,12 +1,11 @@
 """
-Pull the initial inference.tflite from the server and save it locally.
+Pull both inference_rgb.tflite and inference_grayscale.tflite from the server.
 
-Run on the PI before drive_physical_tflite.py.
-The server runs push_init_model.py simultaneously.
+Run on the PI once. After this, drive_physical_tflite.py auto-selects the
+correct model based on --channels — no init scripts needed on future runs.
 
 Usage:
   python scripts/pull_init_model.py --server_ip 192.168.0.103
-  python scripts/pull_init_model.py --server_ip 192.168.0.103 --output models/inference.tflite
 """
 
 import argparse
@@ -21,25 +20,29 @@ from dreamer.comms import MODEL_PORT
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--server_ip', required=True, help='Server IP address')
-parser.add_argument('--output',    default='inference.tflite',
-                    help='Where to save the received model (default: inference.tflite)')
+parser.add_argument('--output_dir', default='.',  help='Directory to save models (default: current dir)')
 args = parser.parse_args()
+
+os.makedirs(args.output_dir, exist_ok=True)
 
 ctx = zmq.Context()
 sock = ctx.socket(zmq.PULL)
-sock.setsockopt(zmq.RCVTIMEO, 60_000)   # 60 s timeout
+sock.setsockopt(zmq.RCVTIMEO, 120_000)   # 2 min — export takes time
 sock.connect(f'tcp://{args.server_ip}:{MODEL_PORT}')
 
 print(f'[Init] Connecting to {args.server_ip}:{MODEL_PORT} ...')
 try:
-    data    = pickle.loads(sock.recv())
-    model_bytes = data['model_bytes']
-    os.makedirs(os.path.dirname(os.path.abspath(args.output)), exist_ok=True)
-    with open(args.output, 'wb') as f:
-        f.write(model_bytes)
-    print(f'[Init] Saved {len(model_bytes) / 1024:.0f} KB → {args.output}')
+    for _ in range(2):   # expect rgb + grayscale
+        data        = pickle.loads(sock.recv())
+        label       = data['label']          # 'rgb' or 'grayscale'
+        model_bytes = data['model_bytes']
+        out_path    = os.path.join(args.output_dir, f'inference_{label}.tflite')
+        with open(out_path, 'wb') as f:
+            f.write(model_bytes)
+        print(f'[Init] Saved inference_{label}.tflite ({len(model_bytes) / 1024:.0f} KB) → {out_path}')
+    print('[Init] Done. Run drive_physical_tflite.py with --channels 3 (RGB) or --channels 1 (grayscale).')
 except zmq.Again:
-    print(f'[Init] Timed out — server did not send a model within 60 s.')
+    print('[Init] Timed out — server did not send models within 120 s.')
     sys.exit(1)
 finally:
     sock.close()

@@ -342,7 +342,9 @@ class PhysicalDreamerCar:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model',        default='./models/inference.tflite')
+    parser.add_argument('--model',        default='',
+                        help='Path to .tflite model. Auto-selects inference_rgb.tflite or '
+                             'inference_grayscale.tflite based on --channels if not set.')
     parser.add_argument('--server_ip',    type=str,  default='',
                         help='Server IP/hostname. Omit for standalone mode.')
     parser.add_argument('--channels',      type=int,  default=1,   help='1=grayscale 3=RGB')
@@ -353,6 +355,11 @@ if __name__ == '__main__':
     parser.add_argument('--seed-episodes', type=int,  default=5,
                         help='Run this many episodes freely before halting for model updates')
     args = parser.parse_args()
+
+    if not args.model:
+        label      = 'rgb' if args.channels == 3 else 'grayscale'
+        args.model = f'inference_{label}.tflite'
+    print(f'[Init] Using model: {args.model}')
 
     car = PhysicalDreamerCar(args)
     car.run()
