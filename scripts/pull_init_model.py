@@ -12,6 +12,7 @@ import argparse
 import os
 import pickle
 import sys
+import zlib
 
 import zmq
 
@@ -27,15 +28,16 @@ os.makedirs(args.output_dir, exist_ok=True)
 
 ctx = zmq.Context()
 sock = ctx.socket(zmq.PULL)
-sock.setsockopt(zmq.RCVTIMEO, 120_000)   # 2 min — export takes time
+sock.setsockopt(zmq.RCVTIMEO, 300_000)
+sock.setsockopt(zmq.RCVBUF, 8 * 1024 * 1024)
 sock.connect(f'tcp://{args.server_ip}:{MODEL_PORT}')
 
 print(f'[Init] Connecting to {args.server_ip}:{MODEL_PORT} ...')
 try:
     for _ in range(2):   # expect rgb + grayscale
         data        = pickle.loads(sock.recv())
-        label       = data['label']          # 'rgb' or 'grayscale'
-        model_bytes = data['model_bytes']
+        label       = data['label']
+        model_bytes = zlib.decompress(data['model_bytes']) if data.get('compressed') else data['model_bytes']
         out_path    = os.path.join(args.output_dir, f'inference_{label}.tflite')
         with open(out_path, 'wb') as f:
             f.write(model_bytes)

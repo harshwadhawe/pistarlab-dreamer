@@ -115,21 +115,25 @@ class ModelPublisher:
     loss). Car uses CONFLATE=1 so only the latest model is kept.
     """
 
+    _BUF = 8 * 1024 * 1024   # 8 MB socket buffer — needed for large TFLite payloads
+
     def __init__(self, bind_ip: str = '*', port: int = MODEL_PORT):
         ctx = zmq.Context()
         self.sock = ctx.socket(zmq.PUSH)
-        self.sock.setsockopt(zmq.SNDTIMEO, 10_000)   # 10 s timeout — don't block if car disconnected
+        self.sock.setsockopt(zmq.SNDTIMEO, 300_000)  # 5 min — slow WiFi needs time
+        self.sock.setsockopt(zmq.SNDBUF,   self._BUF)
         self.sock.bind(f'tcp://{bind_ip}:{port}')
         print(f'[Comms] ModelPublisher bound on tcp://{bind_ip}:{port}')
 
     def publish(self, tflite_path: str, step: int):
         with open(tflite_path, 'rb') as f:
             model_bytes = f.read()
-        payload = pickle.dumps({'model_bytes': model_bytes, 'step': step})
+        compressed = zlib.compress(model_bytes, level=1)  # level=1: fast, ~50% smaller
+        payload = pickle.dumps({'model_bytes': compressed, 'step': step, 'compressed': True})
         try:
             self.sock.send(payload)
             print(f'[Comms] Published model — step {step}, '
-                  f'size {len(model_bytes) / 1024:.0f} KB')
+                  f'{len(model_bytes)//1024} KB → {len(compressed)//1024} KB compressed')
         except zmq.Again:
             print(f'[Comms] WARNING: model publish timed out — '
                   f'car not connected on port {MODEL_PORT}? Skipping.')
@@ -138,15 +142,21 @@ class ModelPublisher:
 class ModelSubscriber:
     """Car — non-blocking poll for updated model bytes from the server."""
 
+    _BUF = 8 * 1024 * 1024   # 8 MB socket buffer
+
     def __init__(self, server_ip: str, port: int = MODEL_PORT):
         ctx = zmq.Context()
         self.sock = ctx.socket(zmq.PULL)
+        self.sock.setsockopt(zmq.RCVBUF, self._BUF)
         self.sock.connect(f'tcp://{server_ip}:{port}')
         print(f'[Comms] ModelSubscriber ← tcp://{server_ip}:{port}')
 
     def poll(self) -> dict | None:
         """Returns dict with model_bytes + step if available, else None."""
         try:
-            return pickle.loads(self.sock.recv(zmq.NOBLOCK))
+            data = pickle.loads(self.sock.recv(zmq.NOBLOCK))
+            if data.get('compressed'):
+                data['model_bytes'] = zlib.decompress(data['model_bytes'])
+            return data
         except zmq.Again:
             return None

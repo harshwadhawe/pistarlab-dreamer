@@ -21,6 +21,7 @@ import sys
 import tempfile
 
 import torch
+import zlib
 import zmq
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
@@ -99,15 +100,17 @@ for ch, label in [(3, 'rgb'), (1, 'grayscale')]:
 # --- Push both via ZMQ (sequential) ---
 ctx = zmq.Context()
 sock = ctx.socket(zmq.PUSH)
-sock.setsockopt(zmq.SNDTIMEO, 60_000)
+sock.setsockopt(zmq.SNDTIMEO, 300_000)
+sock.setsockopt(zmq.SNDBUF, 8 * 1024 * 1024)
 sock.bind(f'tcp://{args.bind_ip}:{MODEL_PORT}')
 
 print(f'\n[Init] Bound on port {MODEL_PORT}. Waiting for Pi to connect...')
 try:
     for label, model_bytes in models:
-        payload = pickle.dumps({'label': label, 'model_bytes': model_bytes})
+        compressed = zlib.compress(model_bytes, level=1)
+        payload = pickle.dumps({'label': label, 'model_bytes': compressed, 'compressed': True})
         sock.send(payload)
-        print(f'[Init] Pushed inference_{label}.tflite ({len(model_bytes) / 1024:.0f} KB)')
+        print(f'[Init] Pushed inference_{label}.tflite ({len(model_bytes)//1024} KB → {len(compressed)//1024} KB compressed)')
     print('[Init] Both models pushed. Pi is ready.')
 except zmq.Again:
     print('[Init] Timed out — Pi did not connect within 60 s.')
