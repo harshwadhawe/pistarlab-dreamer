@@ -1,9 +1,9 @@
 """
-Export both RGB and grayscale TFLite models and push them to the Pi once via ZMQ.
+Export both RGB and grayscale TFLite models and serve them to the Pi via HTTP.
 
 Run on the SERVER once. The Pi runs pull_init_model.py simultaneously.
-After this, the Pi has inference_rgb.tflite and inference_grayscale.tflite and
-never needs to run init scripts again — drive_physical_tflite.py auto-selects.
+After this, the Pi has models/inference_rgb.tflite and models/inference_grayscale.tflite
+and never needs to run init scripts again — drive_physical_tflite.py auto-selects.
 
 Usage:
   # Random init (first run, no checkpoint):
@@ -14,24 +14,25 @@ Usage:
 """
 
 import argparse
+import http.server
 import os
-import pickle
+import socketserver
 import subprocess
 import sys
 import tempfile
+import threading
 
 import torch
-import zmq
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from dreamer.comms import MODEL_PORT
+from dreamer.comms import MODEL_HTTP_PORT
 from dreamer.models.world_model import TransitionModel, VisualObservationModel, RewardModel, VisualEncoder
 from dreamer.models.policy import ActorModel, ValueModel
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--models',        type=str, default='',
                     help='Path to .pth checkpoint. If empty, random init weights are used.')
-parser.add_argument('--bind_ip',       type=str, default='*')
+parser.add_argument('--bind_ip',       type=str, default='')
 parser.add_argument('--belief-size',   type=int, default=200)
 parser.add_argument('--state-size',    type=int, default=30)
 parser.add_argument('--action-size',   type=int, default=2)
@@ -79,7 +80,7 @@ def _export_tflite(ckpt_path, channels):
 
 
 # --- Build both tflite files ---
-models = []
+models = {}
 for ch, label in [(3, 'rgb'), (1, 'grayscale')]:
     if args.models and os.path.exists(args.models):
         ckpt = args.models
@@ -90,29 +91,40 @@ for ch, label in [(3, 'rgb'), (1, 'grayscale')]:
 
     tflite = _export_tflite(ckpt, ch)
     with open(tflite, 'rb') as f:
-        model_bytes = f.read()
-    models.append((label, model_bytes))
+        models[label] = f.read()
     os.remove(tflite)
     if not args.models:
         os.remove(ckpt)
 
-# --- Push both via ZMQ (sequential) ---
-ctx = zmq.Context()
-sock = ctx.socket(zmq.PUSH)
-sock.setsockopt(zmq.SNDTIMEO, 300_000)
-sock.setsockopt(zmq.SNDBUF, 8 * 1024 * 1024)
-sock.bind(f'tcp://{args.bind_ip}:{MODEL_PORT}')
+# --- Serve via HTTP ---
+_models = models
 
-print(f'\n[Init] Bound on port {MODEL_PORT}. Waiting for Pi to connect...')
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        for label, data in _models.items():
+            if self.path == f'/model/{label}':
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/octet-stream')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                print(f'[Init] Served inference_{label}.tflite ({len(data)//1024} KB)')
+                return
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, *_): pass
+
+
+class _ReuseServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+
+host = args.bind_ip if args.bind_ip else ''
+server = _ReuseServer((host, MODEL_HTTP_PORT), Handler)
+print(f'\n[Init] Serving on port {MODEL_HTTP_PORT}. Run pull_init_model.py on the Pi...')
+print(f'       Ctrl+C to stop once Pi has downloaded both models.')
 try:
-    for label, model_bytes in models:
-        payload = pickle.dumps({'label': label, 'model_bytes': model_bytes})
-        sock.send(payload)
-        print(f'[Init] Pushed inference_{label}.tflite ({len(model_bytes)//1024} KB)')
-    print('[Init] Both models pushed. Pi is ready.')
-except zmq.Again:
-    print('[Init] Timed out — Pi did not connect within 60 s.')
-    sys.exit(1)
-finally:
-    sock.close()
-    ctx.term()
+    server.serve_forever()
+except KeyboardInterrupt:
+    print('\n[Init] Done.')

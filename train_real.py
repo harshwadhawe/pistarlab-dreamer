@@ -37,7 +37,7 @@ import torch
 
 from dreamer.config import add_common_args
 from dreamer.agent import Dreamer
-from dreamer.comms import ExperienceReceiver, ModelPublisher
+from dreamer.comms import ExperienceReceiver, ModelPublisher, MODEL_HTTP_PORT
 from dreamer.utils import setup_device
 
 # ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ parser.set_defaults(
 
 # Server-specific
 parser.add_argument('--bind_ip',           type=str, default='*',
-                    help='IP to bind ZMQ sockets (default: all interfaces)')
+                    help='IP to bind sockets (default: all interfaces)')
 parser.add_argument('--push_interval',     type=int, default=1,
                     help='Export + push TFLite to car every N episodes')
 parser.add_argument('--checkpoint_interval', type=int, default=50,
