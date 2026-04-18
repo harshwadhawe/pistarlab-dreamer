@@ -50,7 +50,7 @@ add_common_args(parser)
 # Override defaults that differ for real-world server
 parser.set_defaults(
     episodes=500,
-    grayscale=True,       # must match car drive script --channels
+    grayscale=False,      # RGB by default; pass --grayscale to match a grayscale car
     augment=True,         # sim-to-real augmentations on by default for real world
     expl_amount=0.0,      # TFLite runs deterministic
 )

@@ -62,7 +62,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument('--angle_max', type=float, default=1.0)
 
     # Observation
-    parser.add_argument('--grayscale', action='store_true', default=False,
+    parser.add_argument('--grayscale', action=argparse.BooleanOptionalAction, default=False,
                         help='Use 1-channel grayscale input. Default: 3-channel RGB.')
     parser.add_argument('--observation_size', default=None)
 
