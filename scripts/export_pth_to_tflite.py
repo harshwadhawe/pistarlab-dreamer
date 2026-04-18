@@ -155,7 +155,10 @@ def export(checkpoint_path, output_path, channels, belief_size, state_size,
 
     print('Converting to TFLite (may take a minute)...')
     with torch.no_grad():
-        edge_model = litert_torch.convert(graph, dummy)
+        edge_model = litert_torch.convert(
+            graph, dummy,
+            quantization=litert_torch.Quantization.float16,
+        )
 
     edge_model.export(output_path)
     print(f'Exported → {output_path}')

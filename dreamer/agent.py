@@ -1,3 +1,4 @@
+import contextlib
 import os
 from copy import deepcopy
 
@@ -96,6 +97,10 @@ class Dreamer:
         )
 
         self.free_nats = torch.full((1,), args.free_nats, dtype=torch.float32, device=args.device)
+
+        # Mixed-precision: GradScaler only on CUDA (MPS uses bfloat16 without scaling)
+        self._use_fp16 = getattr(args, 'fp16', False)
+        self._scaler   = torch.amp.GradScaler('cuda') if (self._use_fp16 and str(args.device).startswith('cuda')) else None
 
         self.D = ExperienceReplay(
             args.experience_size, args.symbolic, args.observation_size,
@@ -292,6 +297,30 @@ class Dreamer:
     # Main training loop
     # ------------------------------------------------------------------
 
+    def _autocast(self):
+        """Return the appropriate autocast context for the current device."""
+        if not self._use_fp16:
+            return contextlib.nullcontext()
+        dev = str(self.args.device)
+        if dev.startswith('cuda'):
+            return torch.autocast(device_type='cuda', dtype=torch.float16)
+        if dev.startswith('mps'):
+            return torch.autocast(device_type='mps', dtype=torch.bfloat16)
+        return contextlib.nullcontext()
+
+    def _opt_step(self, loss, optimizer, params_for_clip):
+        """backward → grad-clip → optimizer step, with GradScaler on CUDA."""
+        if self._scaler is not None:
+            self._scaler.scale(loss).backward()
+            self._scaler.unscale_(optimizer)
+            nn.utils.clip_grad_norm_(params_for_clip, self.args.grad_clip_norm, norm_type=2)
+            self._scaler.step(optimizer)
+            self._scaler.update()
+        else:
+            loss.backward()
+            nn.utils.clip_grad_norm_(params_for_clip, self.args.grad_clip_norm, norm_type=2)
+            optimizer.step()
+
     def update_parameters(self, gradient_steps):
         loss_info = []
         for _ in tqdm(range(gradient_steps)):
@@ -303,21 +332,21 @@ class Dreamer:
             init_belief = torch.zeros(self.args.batch_size, self.args.belief_size, device=self.args.device)
             init_state = torch.zeros(self.args.batch_size, self.args.state_size, device=self.args.device)
 
-            beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs = self.transition_model(
-                init_state, actions, init_belief,
-                bottle(self.encoder, (observations,)), nonterminals,
-            )
+            with self._autocast():
+                beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs = self.transition_model(
+                    init_state, actions, init_belief,
+                    bottle(self.encoder, (observations,)), nonterminals,
+                )
 
-            # --- World model update ---
-            world_model_loss = self._compute_loss_world(
-                state=(beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs),
-                data=(observations, rewards, nonterminals),
-            )
+                # --- World model update ---
+                world_model_loss = self._compute_loss_world(
+                    state=(beliefs, prior_states, prior_means, prior_std_devs, posterior_states, posterior_means, posterior_std_devs),
+                    data=(observations, rewards, nonterminals),
+                )
             observation_loss, reward_loss, kl_loss, pcont_loss = world_model_loss
             self.world_optimizer.zero_grad()
-            (observation_loss + reward_loss + kl_loss + pcont_loss).backward()
-            nn.utils.clip_grad_norm_(self.world_param, self.args.grad_clip_norm, norm_type=2)
-            self.world_optimizer.step()
+            self._opt_step(observation_loss + reward_loss + kl_loss + pcont_loss,
+                           self.world_optimizer, self.world_param)
 
             # Freeze world + value params during actor update
             for p in self.world_param:
@@ -328,9 +357,10 @@ class Dreamer:
                 p.requires_grad = False
 
             # --- Latent imagination ---
-            imag_beliefs, imag_states, imag_ac_logps = self._latent_imagination(
-                beliefs, posterior_states, with_logprob=self.args.with_logprob
-            )
+            with self._autocast():
+                imag_beliefs, imag_states, imag_ac_logps = self._latent_imagination(
+                    beliefs, posterior_states, with_logprob=self.args.with_logprob
+                )
 
             # --- Temperature update (auto_temp) ---
             if self.args.auto_temp:
@@ -341,11 +371,10 @@ class Dreamer:
                 self.args.temp = self.log_temp.exp()
 
             # --- Actor update ---
-            actor_loss = self._compute_loss_actor(imag_beliefs, imag_states, imag_ac_logps=imag_ac_logps)
+            with self._autocast():
+                actor_loss = self._compute_loss_actor(imag_beliefs, imag_states, imag_ac_logps=imag_ac_logps)
             self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            nn.utils.clip_grad_norm_(self.actor_model.parameters(), self.args.grad_clip_norm, norm_type=2)
-            self.actor_optimizer.step()
+            self._opt_step(actor_loss, self.actor_optimizer, self.actor_model.parameters())
 
             # Unfreeze
             for p in self.world_param:
@@ -358,12 +387,11 @@ class Dreamer:
             # --- Critic update ---
             imag_beliefs = imag_beliefs.detach()
             imag_states = imag_states.detach()
-            critic_loss = self._compute_loss_critic(imag_beliefs, imag_states, imag_ac_logps=imag_ac_logps)
+            with self._autocast():
+                critic_loss = self._compute_loss_critic(imag_beliefs, imag_states, imag_ac_logps=imag_ac_logps)
             self.value_optimizer.zero_grad()
-            critic_loss.backward()
-            nn.utils.clip_grad_norm_(self.value_model.parameters(), self.args.grad_clip_norm, norm_type=2)
-            nn.utils.clip_grad_norm_(self.value_model2.parameters(), self.args.grad_clip_norm, norm_type=2)
-            self.value_optimizer.step()
+            self._opt_step(critic_loss, self.value_optimizer,
+                           list(self.value_model.parameters()) + list(self.value_model2.parameters()))
 
             loss_info.append([
                 observation_loss.item(), reward_loss.item(), kl_loss.item(),

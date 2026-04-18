@@ -73,6 +73,8 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     # Reproducibility & device
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--disable-cuda', action='store_true')
+    parser.add_argument('--fp16', action='store_true', default=False,
+                        help='Mixed-precision training: float16 on CUDA, bfloat16 on MPS.')
 
     # Checkpoints / resume
     parser.add_argument('--models', type=str, default='')

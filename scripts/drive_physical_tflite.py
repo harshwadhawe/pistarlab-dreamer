@@ -127,7 +127,7 @@ class DreamerTFLite:
 # ZMQ comms (optional — only active when --server_ip is set)
 # ---------------------------------------------------------------------------
 
-from dreamer.comms import make_comms
+from dreamer.comms import make_comms, MODEL_PORT
 
 
 # ---------------------------------------------------------------------------
@@ -302,10 +302,12 @@ class PhysicalDreamerCar:
                         print(f'done. (server step {update["step"]})')
                         break
                     elapsed = time.time() - wait_start
-                    if elapsed > 120:
-                        print(f'[Car] WARNING: no model from server after {elapsed:.0f}s — '
-                              f'check server is running and port {5556} is reachable.')
-                        wait_start = time.time()   # reset so warning repeats every 120 s
+                    if int(elapsed) % 30 == 0 and elapsed > 5:
+                        print(f'[Car] Still waiting for server... {elapsed:.0f}s elapsed', end='\r')
+                    if elapsed > 600:
+                        print(f'\n[Car] WARNING: no model from server after {elapsed:.0f}s — '
+                              f'check server is running and port {MODEL_PORT} is reachable.')
+                        wait_start = time.time()
                     if self.ps4.should_quit:
                         break
                     time.sleep(0.05)
