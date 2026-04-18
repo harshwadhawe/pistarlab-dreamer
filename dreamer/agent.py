@@ -298,14 +298,16 @@ class Dreamer:
     # ------------------------------------------------------------------
 
     def _autocast(self):
-        """Return the appropriate autocast context for the current device."""
+        """Return the appropriate autocast context for the current device.
+
+        MPS autocast is intentionally disabled — bfloat16 backward through
+        TorchScript ops raises dtype mismatch errors on Apple Silicon.
+        """
         if not self._use_fp16:
             return contextlib.nullcontext()
         dev = str(self.args.device)
         if dev.startswith('cuda'):
             return torch.autocast(device_type='cuda', dtype=torch.float16)
-        if dev.startswith('mps'):
-            return torch.autocast(device_type='mps', dtype=torch.bfloat16)
         return contextlib.nullcontext()
 
     def _opt_step(self, loss, optimizer, params_for_clip):

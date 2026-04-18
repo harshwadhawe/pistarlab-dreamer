@@ -24,6 +24,8 @@ the server blocks on recv() indefinitely.
 """
 
 import pickle
+import zlib
+
 import numpy as np
 import zmq
 
