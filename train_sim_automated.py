@@ -84,11 +84,26 @@ agent = Dreamer(args)
 # Load checkpoint / seed episodes
 # ---------------------------------------------------------------------------
 if args.experience_replay != '' and os.path.exists(args.experience_replay):
-    agent.D = torch.load(args.experience_replay)
-    metrics['steps'], metrics['episodes'] = (
-        [agent.D.steps] * agent.D.episodes,
-        list(range(1, agent.D.episodes + 1)),
-    )
+    agent.D = torch.load(args.experience_replay, weights_only=False)
+    if args.models != '' and os.path.exists(args.models):
+        agent.load_checkpoint(args.models)
+    # Determine last completed episode from CSV (most reliable source of truth)
+    import pandas as pd
+    if os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
+        _df = pd.read_csv(csv_path)
+        if len(_df) > 0:
+            last_ep = int(_df['episode'].max())
+            last_steps = int(_df['steps'].max())
+            metrics['steps']    = list(range(last_steps, last_steps + 1)) * last_ep
+            metrics['episodes'] = list(range(1, last_ep + 1))
+            print(f'[Resume] Loaded model + buffer, continuing from episode {last_ep + 1}')
+        else:
+            metrics['steps'] = [agent.D.steps] * agent.D.episodes
+            metrics['episodes'] = list(range(1, agent.D.episodes + 1))
+    else:
+        metrics['steps'] = [agent.D.steps] * agent.D.episodes
+        metrics['episodes'] = list(range(1, agent.D.episodes + 1))
+        print(f'[Resume] Loaded model + buffer ({agent.D.episodes} episodes)')
 else:
     for s in range(1, args.seed_episodes + 1):
         observation, done, t = env.reset(), False, 0
@@ -127,22 +142,30 @@ for episode in tqdm(
 
     # --- Data collection ---
     with torch.no_grad():
-        observation, total_reward = env.reset(), 0
-        belief = torch.zeros(1, args.belief_size, device=args.device)
-        posterior_state = torch.zeros(1, args.state_size, device=args.device)
-        action = torch.zeros(1, env.action_size, device=args.device)
+        try:
+            observation, total_reward = env.reset(), 0
+            belief = torch.zeros(1, args.belief_size, device=args.device)
+            posterior_state = torch.zeros(1, args.state_size, device=args.device)
+            action = torch.zeros(1, env.action_size, device=args.device)
 
-        for t in range(args.max_episode_length):
-            belief, posterior_state = agent.infer_state(
-                observation.to(device=args.device), action, belief, posterior_state
-            )
-            action = agent.select_action((belief, posterior_state), deterministic=False)
-            next_observation, reward, done = env.step(action[0].cpu())
-            agent.D.append(next_observation, action.cpu(), reward, done)
-            total_reward += reward
-            observation = next_observation
-            if done:
-                break
+            for t in range(args.max_episode_length):
+                belief, posterior_state = agent.infer_state(
+                    observation.to(device=args.device), action, belief, posterior_state
+                )
+                action = agent.select_action((belief, posterior_state), deterministic=False)
+                next_observation, reward, done = env.step(action[0].cpu())
+                agent.D.append(next_observation, action.cpu(), reward, done)
+                total_reward += reward
+                observation = next_observation
+                if done:
+                    break
+        except Exception as e:
+            print(f'\n[ERROR] Sim connection lost during collection (episode {episode}): {e}')
+            print('[ERROR] Save checkpoint and exit. Restart sim and resume.')
+            agent.save_checkpoint(os.path.join(results_dir, f'models_crash_ep{episode}.pth'))
+            csv_file.close()
+            env.close()
+            raise SystemExit(1)
 
     ep_len = t + 1
     metrics['steps'].append(t + metrics['steps'][-1])
@@ -166,28 +189,34 @@ for episode in tqdm(
     if episode % args.test_interval == 0:
         agent.set_eval_mode()
 
-        with torch.no_grad():
-            observation = env.reset()
-            total_rewards = 0
-            belief = torch.zeros(args.test_episodes, args.belief_size, device=args.device)
-            posterior_state = torch.zeros(args.test_episodes, args.state_size, device=args.device)
-            action = torch.zeros(args.test_episodes, env.action_size, device=args.device)
+        try:
+            with torch.no_grad():
+                observation = env.reset()
+                total_rewards = 0
+                belief = torch.zeros(args.test_episodes, args.belief_size, device=args.device)
+                posterior_state = torch.zeros(args.test_episodes, args.state_size, device=args.device)
+                action = torch.zeros(args.test_episodes, env.action_size, device=args.device)
 
-            for t in range(args.max_episode_length):
-                belief, posterior_state = agent.infer_state(
-                    observation.to(device=args.device), action, belief, posterior_state
-                )
-                action = agent.select_action((belief, posterior_state), deterministic=True)
-                next_observation, reward, done = env.step(action[0].cpu())
-                total_rewards += reward
-                observation = next_observation
-                if done:
-                    break
+                eval_limit = min(args.max_episode_length, 500)
+                for t in range(eval_limit):
+                    belief, posterior_state = agent.infer_state(
+                        observation.to(device=args.device), action, belief, posterior_state
+                    )
+                    action = agent.select_action((belief, posterior_state), deterministic=True)
+                    next_observation, reward, done = env.step(action[0].cpu())
+                    total_rewards += reward
+                    observation = next_observation
+                    if done:
+                        break
 
-        metrics['test_episodes'].append(episode)
-        metrics['test_rewards'].append(total_rewards)
-        agent.save_reconstruction(images_dir, episode, args.episodes)
-        generate_plots(csv_path, results_dir)
+            metrics['test_episodes'].append(episode)
+            metrics['test_rewards'].append(total_rewards)
+            agent.save_reconstruction(images_dir, episode, args.episodes)
+            generate_plots(csv_path, results_dir)
+
+        except Exception as e:
+            print(f'\n[ERROR] Sim connection lost during eval (episode {episode}): {e}')
+            print('[ERROR] Skipping eval, continuing training.')
 
         agent.set_train_mode()
 

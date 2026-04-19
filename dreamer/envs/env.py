@@ -33,10 +33,15 @@ class DonkeyCarEnv:
         self._first_reset = True
         self.controller = controller
         self.discard_requested = False
-        conf = {'host': host, 'port': port, 'max_cte': 4}
+        conf = {'host': host, 'port': port, 'max_cte': 4, 'socket_local_address': host}
         if sim_path != 'self':
             conf['exe_path'] = sim_path
         self._env = gym.make(env, conf=conf)
+        # Set socket timeout so a frozen sim raises OSError instead of hanging
+        try:
+            self._env.unwrapped.viewer.client.sock.settimeout(15.0)
+        except Exception:
+            pass
 
         self.max_episode_length = max_episode_length
         self.last_cte = 0.0

@@ -106,7 +106,7 @@ checkpoint_experience = false
 
 env                   = "donkey-generated-track-v0"
 episodes              = 20
-experience_size       = 100000
+experience_size       = 25000        # 20 episodes × ~1000 steps, keeps buffer ~230MB
 max_episode_length    = 1000
 
 sim_path              = "self"
@@ -124,15 +124,15 @@ seed                  = 1            # change per run: 1, 2, 3
 # ── Ablation flags — flip ONE at a time ──────────────────────────────────────
 kl_balance            = true
 symlog_rewards        = true
-return_norm           = true
+return_norm           = false
 
 # Evaluation
 test_interval         = 5
 test_episodes         = 1
 
 # Checkpointing
-checkpoint_interval   = 10
-checkpoint_experience = false
+checkpoint_interval   = 5
+checkpoint_experience = true
 
 
 # ─────────────────────────────────────────────────────────────────────────────

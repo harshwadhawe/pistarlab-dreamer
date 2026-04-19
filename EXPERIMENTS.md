@@ -58,6 +58,27 @@ Do **not** use seed 42 as one of three — it's the config.toml default and will
 
 ---
 
+## Plotting
+
+**During training** — `plots.png` regenerated every `test_interval` episodes alongside reconstruction images. Shows reward + all losses in a single row. Uses matplotlib, saved as PNG.
+
+**After all experiments** — comparison plot with mean ± std shaded bands across seeds:
+
+```bash
+# Reward only (default)
+python scripts/plot_ablation.py
+
+# Multiple metrics
+python scripts/plot_ablation.py --metrics reward kl_loss actor_loss
+
+# Custom output path
+python scripts/plot_ablation.py --metrics reward --out figures/ablation_reward.png
+```
+
+Saves to `results/donkey-generated-track-v0/ablation.png`. Uses seaborn `tab10` palette with one curve per experiment.
+
+---
+
 ## What to Report
 
 For each experiment, compute across 3 seeds:

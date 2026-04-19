@@ -22,7 +22,7 @@ echo "========================================"
 for SEED in 1 2 3; do
     echo ""
     echo "--- Seed $SEED / 3 ---"
-    conda run -n donkeycar-dreamer python train_sim_automated.py --seed "$SEED" --name "$NAME"
+    python -u train_sim_automated.py --seed "$SEED" --name "$NAME"
 done
 
 echo ""
