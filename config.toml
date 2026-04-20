@@ -62,6 +62,13 @@ grayscale             = false   # true → 1-channel, false → 3-channel RGB
 seed                  = 42
 disable_cuda          = false
 
+# ── Smoothing ─────────────────────────────────────────────────────────────────
+smooth_weight         = 0.0         # steering jitter penalty (0 = off)
+smooth_window         = 10          # rolling window for std dev
+
+# ── Experiment identity ───────────────────────────────────────────────────────
+experiment_name       = ""          # tag appended to rewards CSV name; empty = timestamp
+
 # ── Resume (leave empty to start fresh) ──────────────────────────────────────
 models            = ""
 experience_replay = ""
@@ -84,8 +91,6 @@ port                  = 9091
 # Human override (keyboard controls episode outcome)
 human_override        = true
 fix_speed             = false       # variable throttle [0.1, 0.5]
-smooth_weight         = 0.0
-smooth_window         = 10
 
 # Episode termination
 max_cte               = 4.0
@@ -123,18 +128,14 @@ sim_path              = "self"
 host                  = "127.0.0.1"
 port                  = 9091
 
-smooth_weight         = 0.0
-smooth_window         = 10
 augment               = false
-
-# ── Experiment identity ───────────────────────────────────────────────────────
-experiment_name       = "baseline"   # saved as rewards_{experiment_name}.csv
+experiment_name       = "baseline"   # overrides [common] empty default
 seed                  = 1            # change per run: 1, 2, 3
 
-# ── Ablation flags — flip ONE at a time ──────────────────────────────────────
-kl_balance            = true
-symlog_rewards        = true
-return_norm           = true
+# Ablation flags — inherited from [common]; add overrides here to flip ONE at a time
+# kl_balance          = false
+# symlog_rewards      = false
+# return_norm         = false
 
 # Evaluation
 test_interval         = 5
@@ -165,8 +166,7 @@ bind_ip               = "*"         # bind to all interfaces
 # Model/checkpoint cadence
 push_interval         = 1           # export + push TFLite every N episodes
 checkpoint_interval   = 50
-smooth_weight         = 0.1
-smooth_window         = 10
+smooth_weight         = 0.1         # override: real car needs more smoothing than sim
 
 
 # ─────────────────────────────────────────────────────────────────────────────
