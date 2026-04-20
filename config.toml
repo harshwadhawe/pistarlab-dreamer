@@ -34,7 +34,7 @@ aug_crop_frac         = 0.9         # crop to this fraction then resize back
 
 # ── DonkeyCar action constraints ─────────────────────────────────────────────
 fix_speed             = true        # true → steering only; false → variable throttle
-throttle_base         = 0.25         # fixed throttle when fix_speed=true
+throttle_base         = 0.3          # fixed throttle when fix_speed=true
 throttle_min          = 0.1
 throttle_max          = 0.5
 angle_min             = -1.0
@@ -172,7 +172,7 @@ checkpoint_experience = false
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Run length ────────────────────────────────────────────────────────────────
-episodes              = 500
+episodes              = 30
 experience_size       = 50000       # ~230 MB for RGB
 results_dir           = "results/real"
 
@@ -196,4 +196,4 @@ smooth_weight         = 0.1         # override: real car needs more smoothing th
 
 server_ip             = "192.168.0.104"   # Mac IP — run `ipconfig getifaddr en0`
 model                 = ""                # leave empty to auto-select from models/
-max_episode_steps     = 1000              # auto-end episode after N steps (~8s at 60fps)
+max_episode_steps     = 2000              # auto-end episode after N steps (~33s at 60fps)
