@@ -12,6 +12,7 @@ Usage:
 
 import csv
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -83,14 +84,18 @@ publisher = ModelPublisher(bind_ip=args.bind_ip)
 # TFLite export
 # ---------------------------------------------------------------------------
 def export_and_publish(episode_count: int) -> None:
-    tflite_path = os.path.join(run_dir, f'inference_{episode_count}.tflite')
-    ckpt_path   = os.path.join(run_dir, f'export_weights_{episode_count}.pth')
+    label     = 'rgb' if args.channels == 3 else 'grayscale'
+    ckpt_path = os.path.join(run_dir, f'inference_weights_{episode_count}.pth')
+    # Archived copy in run_dir + latest in models/ for Pi fixed-path lookup
+    tflite_run    = os.path.join(run_dir,    f'inference_{label}_{episode_count}.tflite')
+    tflite_latest = os.path.join('models',   f'inference_{label}.tflite')
+    os.makedirs('models', exist_ok=True)
 
     agent.save_inference_checkpoint(ckpt_path)
 
     cmd = [
         sys.executable, 'scripts/export_pth_to_tflite.py', ckpt_path,
-        '--output', tflite_path,
+        '--output',         tflite_run,
         '--channels',       str(args.channels),
         '--belief-size',    str(args.belief_size),
         '--state-size',     str(args.state_size),
@@ -99,13 +104,18 @@ def export_and_publish(episode_count: int) -> None:
         '--hidden-size',    str(args.hidden_size),
         '--throttle-base',  str(args.throttle_base),
     ]
-    print(f'[Server] Exporting TFLite (episode {episode_count})...')
+    print(f'[Server] Exporting TFLite {label} (episode {episode_count})...')
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f'[Server] Export FAILED:\n{result.stderr}')
         return
     print(result.stdout.strip())
-    publisher.publish(tflite_path, step=agent.D.steps)
+
+    # Copy to models/ so Pi always has a fixed path to pull from
+    shutil.copy2(tflite_run, tflite_latest)
+    print(f'[Server] Latest model → {tflite_latest}')
+
+    publisher.publish(tflite_run, step=agent.D.steps)
 
 
 # ---------------------------------------------------------------------------
