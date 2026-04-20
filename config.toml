@@ -88,6 +88,7 @@ smooth_window         = 10          # rolling window for std dev
 
 # Augmentation
 augment               = false
+hflip                 = true
 
 # Evaluation
 test                  = false
@@ -146,6 +147,7 @@ results_dir           = "results/real"
 
 # Augmentation on by default for sim-to-real transfer
 augment               = true
+hflip                 = true
 expl_amount           = 0.0         # TFLite inference is deterministic
 
 # Car communication

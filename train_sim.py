@@ -142,6 +142,7 @@ for episode in tqdm(
             posterior_state = torch.zeros(1, args.state_size, device=args.device)
             action = torch.zeros(1, env.action_size, device=args.device)
             cte_history = []
+            ep_obs, ep_actions, ep_rewards, ep_dones = [], [], [], []
 
             pbar = tqdm(range(args.max_episode_length))
             for t in pbar:
@@ -150,7 +151,10 @@ for episode in tqdm(
                 )
                 action = agent.select_action((belief, posterior_state), deterministic=False)
                 next_observation, reward, done = env.step(action[0].cpu())
-                agent.D.append(next_observation, action.cpu(), reward, done)
+                ep_obs.append(next_observation)
+                ep_actions.append(action.cpu())
+                ep_rewards.append(reward)
+                ep_dones.append(done)
                 total_reward += reward
                 observation = next_observation
                 if hasattr(env, 'last_cte') and not args.human_override:
@@ -163,6 +167,18 @@ for episode in tqdm(
                 agent.D.restore(buf_snap)
                 print('[DISCARD] Episode erased — retrying...')
                 continue
+
+            # Append original episode
+            for o, a, r, d in zip(ep_obs, ep_actions, ep_rewards, ep_dones):
+                agent.D.append(o, a, r, d)
+
+            # Append horizontally flipped copy (flip all frames + negate steering)
+            if args.hflip:
+                for o, a, r, d in zip(ep_obs, ep_actions, ep_rewards, ep_dones):
+                    o_flip = torch.flip(o, [-1])
+                    a_flip = a.clone()
+                    a_flip[:, 0] = -a_flip[:, 0]
+                    agent.D.append(o_flip, a_flip, r, d)
             break
 
     ep_len = t + 1

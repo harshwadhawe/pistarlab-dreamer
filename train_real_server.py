@@ -136,6 +136,12 @@ while episode_count < args.episodes:
 
     agent.append_episode(obs, actions, rewards, dones)
 
+    if args.hflip:
+        obs_flip     = obs[:, :, :, ::-1].copy()
+        actions_flip = actions.copy()
+        actions_flip[:, 0] = -actions_flip[:, 0]
+        agent.append_episode(obs_flip, actions_flip, rewards, dones)
+
     episode_count += 1
     total_reward = float(rewards.sum())
     print(f'[Server] Episode {ep.get("episode_num", episode_count):>4d} | '
