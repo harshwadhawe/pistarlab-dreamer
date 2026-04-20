@@ -12,7 +12,6 @@ from dreamer.config import load_config
 from dreamer.envs import Env
 from dreamer.agent import Dreamer
 from dreamer.utils import setup_device
-from scripts.plot_run import generate_plots
 
 args = load_config('sim')
 
@@ -54,7 +53,6 @@ setup_device(args)
 
 metrics = {
     'steps': [], 'episodes': [], 'train_rewards': [],
-    'test_episodes': [], 'test_rewards': [],
     'observation_loss': [], 'reward_loss': [], 'kl_loss': [],
     'actor_loss': [], 'value_loss': [],
     'episode_lengths': [], 'mean_cte': [],
@@ -221,35 +219,6 @@ for episode in tqdm(
         round(float(np.mean(losses[5])), 4),
     ])
     csv_file.flush()
-
-    # --- Evaluation ---
-    if episode % args.test_interval == 0:
-        agent.set_eval_mode()
-
-        with torch.no_grad():
-            observation = env.reset()
-            total_rewards = 0
-            belief = torch.zeros(args.test_episodes, args.belief_size, device=args.device)
-            posterior_state = torch.zeros(args.test_episodes, args.state_size, device=args.device)
-            action = torch.zeros(args.test_episodes, env.action_size, device=args.device)
-
-            for t in tqdm(range(args.max_episode_length)):
-                belief, posterior_state = agent.infer_state(
-                    observation.to(device=args.device), action, belief, posterior_state
-                )
-                action = agent.select_action((belief, posterior_state), deterministic=True)
-                next_observation, reward, done = env.step(action[0].cpu())
-                total_rewards += reward
-                observation = next_observation
-                if done:
-                    break
-
-        metrics['test_episodes'].append(episode)
-        metrics['test_rewards'].append(total_rewards)
-        agent.save_reconstruction(images_dir, episode, args.episodes)
-        generate_plots(csv_path, results_dir)
-
-        agent.set_train_mode()
 
     print('episodes: {}, total_steps: {}, train_reward: {}'.format(
         metrics['episodes'][-1], metrics['steps'][-1], metrics['train_rewards'][-1]
