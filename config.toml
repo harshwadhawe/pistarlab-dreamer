@@ -12,7 +12,7 @@ experiment_name       = ""          # tag appended to rewards CSV; empty = times
 seed                  = 42
 
 # ── Observation ───────────────────────────────────────────────────────────────
-grayscale             = false       # true → 1-channel, false → 3-channel RGB
+grayscale             = false       # true → 1-channel, false → 3-channel RGB; must match exported TFLite
 
 # ── Augmentation ──────────────────────────────────────────────────────────────
 augment               = false       # DrQ pixel augmentation
@@ -84,7 +84,6 @@ disable_cuda          = false
 
 # ── Experiment ── (change these most often) ───────────────────────────────────
 env                   = "donkey-generated-track-v0"
-augment               = false
 hflip                 = true
 fix_speed             = false       # variable throttle [0.1, 0.5]
 
@@ -128,7 +127,6 @@ checkpoint_experience = false
 env                   = "donkey-generated-track-v0"
 experiment_name       = "baseline"  # overrides [common] empty default
 seed                  = 1           # change per run: 1, 2, 3
-augment               = false
 
 # Ablation flags — inherited from [common]; uncomment + flip ONE at a time
 # kl_balance          = false
@@ -162,7 +160,6 @@ checkpoint_experience = false
 # ── Experiment ── (change these most often) ───────────────────────────────────
 augment               = true
 hflip                 = true
-grayscale             = false       # must match the exported TFLite model
 
 # ── Run length ────────────────────────────────────────────────────────────────
 episodes              = 500
