@@ -26,21 +26,32 @@ from dreamer.utils import setup_device
 
 args = load_config('real')
 
+a = vars(args)
+print(
+    f'[Config] experiment={a["experiment_name"] or "(none)"}  seed={a["seed"]}  episodes={a["episodes"]}  device=(set after)\n'
+    f'         arch:   belief={a["belief_size"]} state={a["state_size"]} hidden={a["hidden_size"]} embed={a["embedding_size"]} {"grayscale" if a["grayscale"] else "RGB"}\n'
+    f'         train:  batch={a["batch_size"]} chunk={a["chunk_size"]} collect={a["collect_interval"]} world_lr={a["world_lr"]}\n'
+    f'         policy: fix_speed={a["fix_speed"]} throttle={a["throttle_base"]} expl={a["expl_amount"]}\n'
+    f'         flags:  hflip={a["hflip"]} augment={a["augment"]} push_every={a["push_interval"]} ckpt_every={a["checkpoint_interval"]}'
+)
+
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
-os.makedirs(args.results_dir, exist_ok=True)
-images_dir = os.path.join(args.results_dir, 'images')
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+run_name  = f'{args.experiment_name}_{timestamp}' if args.experiment_name else timestamp
+run_dir    = os.path.join(args.results_dir, run_name)
+images_dir = os.path.join(run_dir, 'images')
+os.makedirs(run_dir,    exist_ok=True)
 os.makedirs(images_dir, exist_ok=True)
 
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
 setup_device(args)
-print(f'[Server] Device: {args.device}')
+print(f'[Server] Device: {args.device}  run → {run_dir}')
 
-run_id   = datetime.now().strftime('%Y%m%d_%H%M%S')
-csv_path = os.path.join(args.results_dir, f'rewards_{run_id}.csv')
+csv_path = os.path.join(run_dir, 'rewards.csv')
 csv_file = open(csv_path, 'w', newline='')
 csv_writer = csv.writer(csv_file)
 csv_writer.writerow(['episode', 'steps', 'reward',
@@ -72,8 +83,8 @@ publisher = ModelPublisher(bind_ip=args.bind_ip)
 # TFLite export
 # ---------------------------------------------------------------------------
 def export_and_publish(episode_count: int) -> None:
-    tflite_path = os.path.join(args.results_dir, f'inference_{episode_count}.tflite')
-    ckpt_path   = os.path.join(args.results_dir, f'export_weights_{episode_count}.pth')
+    tflite_path = os.path.join(run_dir, f'inference_{episode_count}.tflite')
+    ckpt_path   = os.path.join(run_dir, f'export_weights_{episode_count}.pth')
 
     agent.save_inference_checkpoint(ckpt_path)
 
@@ -101,15 +112,11 @@ def export_and_publish(episode_count: int) -> None:
 # Checkpoint helpers
 # ---------------------------------------------------------------------------
 def save_checkpoint(episode_count: int) -> None:
-    path = os.path.join(args.results_dir, f'models_{episode_count}.pth')
+    path = os.path.join(run_dir, f'models_{episode_count}.pth')
     agent.save_checkpoint(path)
-    torch.save(agent.D, os.path.join(args.results_dir, 'experience.pth'))
-    print(f'[Server] Checkpoint saved → {path}')
-
-
-def save_reconstruction(episode_count: int) -> None:
+    torch.save(agent.D, os.path.join(run_dir, 'experience.pth'))
     agent.save_reconstruction(images_dir, episode_count, args.episodes)
-    print(f'[Server] Reconstruction image saved → images/ep_{episode_count}.png')
+    print(f'[Server] Checkpoint saved → {path}')
 
 
 # ---------------------------------------------------------------------------
@@ -167,11 +174,13 @@ while episode_count < args.episodes:
     csv_file.flush()
 
     if episode_count == args.seed_episodes:
-        print('[Server] Seed phase complete — pushing initial model to car...')
+        print('[Server] Seed phase complete — pinning reconstruction sequences...')
+        _pin_obs, _pin_actions, _, _pin_nonterminals = agent.D.sample(5, args.chunk_size)
+        agent.pin_reconstruction_sequences(_pin_obs, _pin_actions, _pin_nonterminals)
+        agent.save_reconstruction(images_dir, 0, args.episodes)
+        print(f'[Server] Baseline reconstruction saved → {images_dir}/ep_000.png')
         export_and_publish(episode_count)
     elif episode_count > args.seed_episodes:
-        if episode_count % args.push_interval == 0:
-            save_reconstruction(episode_count)
         export_and_publish(episode_count)
 
     if episode_count % args.checkpoint_interval == 0:
