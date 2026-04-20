@@ -19,17 +19,17 @@ augment               = false       # DrQ pixel augmentation
 hflip                 = false       # append horizontally-flipped copy of each episode
 
 # Augmentation parameters (only used when augment=true)
-aug_brightness        = 0.3         # ±brightness shift  (tuned from IL: 0.3 best)
+aug_brightness        = 0.3         # ±brightness shift  (tuned from IL)
 aug_contrast          = 0.2         # ±contrast scale
-aug_shadow_prob       = 0.5         # probability of applying horizontal shadow band
-aug_shadow_intensity  = 0.4         # shadow darkness multiplier
-aug_blur_prob         = 0.05        # probability of applying gaussian blur  (tuned from IL: 0.05 best)
+aug_shadow_prob       = 0.3         # probability of shadow band  (was 0.5 — too frequent)
+aug_shadow_intensity  = 0.7         # shadow multiplier  (was 0.4 — too dark; real shadows ~30% reduction)
+aug_blur_prob         = 0.05        # probability of gaussian blur  (tuned from IL)
 aug_blur_kernel       = 5           # blur kernel size (pixels)
 aug_noise_std         = 0.02        # gaussian noise standard deviation
-aug_gamma_lo          = 0.7         # gamma range lower bound
-aug_gamma_hi          = 1.4         # gamma range upper bound
+aug_gamma_lo          = 0.8         # gamma lower bound  (was 0.7 — too overexposed for Pi camera)
+aug_gamma_hi          = 1.4         # gamma upper bound
 aug_erase_prob        = 0.2         # probability of random erase / cutout
-aug_erase_max_frac    = 0.2         # max erased area as fraction of image
+aug_erase_max_frac    = 0.12        # max erased area  (was 0.2 — 13×13px wipes entire road on 64×64)
 aug_crop_frac         = 0.9         # crop to this fraction then resize back
 
 # ── DonkeyCar action constraints ─────────────────────────────────────────────
