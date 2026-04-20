@@ -21,19 +21,21 @@ def _images_to_observation(images, channels=1):
 
 
 class DonkeyCarEnv:
-    STUCK_SPEED_THRESHOLD = 0.1
-    STUCK_STEPS_LIMIT = 15
-
     def __init__(self, env, seed, max_episode_length,
                  sim_path, host='127.0.0.1', port=9091,
-                 controller=None, smooth_weight=0.0, smooth_window=10, channels=1):
+                 controller=None, smooth_weight=0.0, smooth_window=10, channels=1,
+                 max_cte=4.0, stuck_speed_threshold=0.1, stuck_steps_limit=15,
+                 survival_bonus=0.5):
         import gymnasium as gym
         import gym_donkeycar  # registers envs with gymnasium
         self._seed = seed
         self._first_reset = True
         self.controller = controller
         self.discard_requested = False
-        conf = {'host': host, 'port': port, 'max_cte': 4}
+        self._stuck_speed_threshold = stuck_speed_threshold
+        self._stuck_steps_limit = stuck_steps_limit
+        self._survival_bonus = survival_bonus
+        conf = {'host': host, 'port': port, 'max_cte': max_cte}
         if sim_path != 'self':
             conf['exe_path'] = sim_path
         self._env = gym.make(env, conf=conf)
@@ -79,20 +81,20 @@ class DonkeyCarEnv:
             reward_k, terminated, discard = self.controller.event_to_outcome(ev)
             if discard:
                 self.discard_requested = True
+            if not terminated:
+                reward_k = self._survival_bonus + float(action[1])
         else:
             self.last_cte = float(info.get('cte', 0.0))
             if hit:
                 terminated = True
-            if speed < self.STUCK_SPEED_THRESHOLD:
+            if speed < self._stuck_speed_threshold:
                 self._stuck_steps += 1
             else:
                 self._stuck_steps = 0
-            if self._stuck_steps >= self.STUCK_STEPS_LIMIT:
+            if self._stuck_steps >= self._stuck_steps_limit:
                 terminated = True
 
         self._steer_buf.append(float(action[0]))
-        if self.smooth_weight > 0.0 and not terminated and len(self._steer_buf) >= 2:
-            reward_k -= self.smooth_weight * float(np.std(self._steer_buf))
 
         self.t += 1
         self._episode_steps += 1
@@ -130,10 +132,16 @@ class DonkeyCarEnv:
 
 
 def Env(env, seed, max_episode_length, sim_path, host, port,
-        controller=None, smooth_weight=0.0, smooth_window=10, channels=1):
+        controller=None, smooth_weight=0.0, smooth_window=10, channels=1,
+        max_cte=4.0, stuck_speed_threshold=0.1, stuck_steps_limit=15,
+        survival_bonus=0.5):
     if env in DONKEY_CAR_ENVS:
         return DonkeyCarEnv(env, seed, max_episode_length,
                             sim_path, host, port,
                             controller=controller, smooth_weight=smooth_weight,
-                            smooth_window=smooth_window, channels=channels)
+                            smooth_window=smooth_window, channels=channels,
+                            max_cte=max_cte,
+                            stuck_speed_threshold=stuck_speed_threshold,
+                            stuck_steps_limit=stuck_steps_limit,
+                            survival_bonus=survival_bonus)
     raise NotImplementedError(f'Unknown environment: {env}')

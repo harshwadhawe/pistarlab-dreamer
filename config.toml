@@ -83,8 +83,17 @@ port                  = 9091
 
 # Human override (keyboard controls episode outcome)
 human_override        = true
-smooth_weight         = 0.1         # steering jitter penalty (0 = off)
-smooth_window         = 10          # rolling window for std dev
+fix_speed             = false       # variable throttle [0.1, 0.5]
+smooth_weight         = 0.0
+smooth_window         = 10
+
+# Episode termination
+max_cte               = 4.0
+stuck_speed_threshold = 0.1
+stuck_steps_limit     = 15
+
+# Reward (human_override=true path only)
+survival_bonus        = 0.5        # added to throttle each step when not terminated
 
 # Augmentation
 augment               = false

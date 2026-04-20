@@ -52,11 +52,14 @@ class ActorModel(nn.Module):
 
     def __init__(self, action_size, belief_size, state_size, hidden_size,
                  mean_scale=5, min_std=1e-4, init_std=5,
-                 activation_function='elu', fix_speed=False, throttle_base=0.3):
+                 activation_function='elu', fix_speed=False, throttle_base=0.3,
+                 throttle_min=0.1, throttle_max=0.5):
         super().__init__()
         self.act_fn = getattr(F, activation_function)
         self.fix_speed = fix_speed
         self.throttle_base = throttle_base
+        self.throttle_loc   = (throttle_max + throttle_min) / 2
+        self.throttle_scale = (throttle_max - throttle_min) / 2
         self.min_std = min_std
         self.init_std = init_std
         self.mean_scale = mean_scale
@@ -89,8 +92,8 @@ class ActorModel(nn.Module):
             transform = [
                 AffineTransform(0., 2.), SigmoidTransform(), AffineTransform(-1., 2.),
                 AffineTransform(
-                    loc=torch.tensor([0.0, self.throttle_base]).to(device),
-                    scale=torch.tensor([1.0, 0.2]).to(device),
+                    loc=torch.tensor([0.0, self.throttle_loc]).to(device),
+                    scale=torch.tensor([1.0, self.throttle_scale]).to(device),
                 ),
             ]
 

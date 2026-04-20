@@ -56,6 +56,8 @@ class Dreamer:
             activation_function=args.dense_act,
             fix_speed=args.fix_speed,
             throttle_base=args.throttle_base,
+            throttle_min=args.throttle_min,
+            throttle_max=args.throttle_max,
         ).to(device=args.device)
 
         self.value_model = ValueModel(

@@ -16,9 +16,15 @@ from scripts.plot_run import generate_plots
 
 args = load_config('sim')
 
-print(' ' * 26 + 'Options')
-for k, v in vars(args).items():
-    print(' ' * 26 + k + ': ' + str(v))
+a = vars(args)
+print(
+    f'[Config] env={a["env"]}  seed={a["seed"]}  episodes={a["episodes"]}  device=(set after)\n'
+    f'         arch:   belief={a["belief_size"]} state={a["state_size"]} hidden={a["hidden_size"]} embed={a["embedding_size"]} {"grayscale" if a["grayscale"] else "RGB"}\n'
+    f'         train:  batch={a["batch_size"]} chunk={a["chunk_size"]} collect={a["collect_interval"]} world_lr={a["world_lr"]} actor_lr={a["actor_lr"]}\n'
+    f'         policy: horizon={a["planning_horizon"]} discount={a["discount"]} expl={a["expl_amount"]} fix_speed={a["fix_speed"]} throttle={a["throttle_base"]}\n'
+    f'         flags:  hflip={a["hflip"]} augment={a["augment"]} kl_balance={a["kl_balance"]} symlog={a["symlog_rewards"]} return_norm={a["return_norm"]}\n'
+    f'         term:   max_cte={a["max_cte"]} stuck_spd={a["stuck_speed_threshold"]} stuck_steps={a["stuck_steps_limit"]}'
+)
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -34,7 +40,7 @@ csv_file = open(csv_path, 'w', newline='')
 csv_writer = csv.writer(csv_file)
 csv_writer.writerow([
     'episode', 'steps', 'reward',
-    'mean_cte', 'max_cte', 'std_cte', 'survival_rate',
+    'mean_cte', 'max_cte', 'std_cte', 'survival_rate', 'mean_throttle',
     'obs_loss', 'kl_loss', 'reward_loss', 'actor_loss', 'value_loss',
 ])
 csv_file.flush()
@@ -62,7 +68,11 @@ if args.human_override:
 env = Env(args.env, args.seed, args.max_episode_length,
           sim_path=args.sim_path, host=args.host, port=args.port,
           controller=controller, smooth_weight=args.smooth_weight,
-          smooth_window=args.smooth_window, channels=args.channels)
+          smooth_window=args.smooth_window, channels=args.channels,
+          max_cte=args.max_cte,
+          stuck_speed_threshold=args.stuck_speed_threshold,
+          stuck_steps_limit=args.stuck_steps_limit,
+          survival_bonus=args.survival_bonus)
 agent = Dreamer(args)
 
 # ---------------------------------------------------------------------------
@@ -89,7 +99,8 @@ elif not args.test:
         observation, done, t = env.reset(), False, 0
         while not done:
             action = env.sample_random_action()
-            action[1] = args.throttle_base
+            if args.fix_speed:
+                action[1] = args.throttle_base
             next_observation, reward, done = env.step(action)
             agent.D.append(next_observation, action, reward, done)
             observation = next_observation
@@ -142,6 +153,7 @@ for episode in tqdm(
             posterior_state = torch.zeros(1, args.state_size, device=args.device)
             action = torch.zeros(1, env.action_size, device=args.device)
             cte_history = []
+            throttle_history = []
             ep_obs, ep_actions, ep_rewards, ep_dones = [], [], [], []
 
             pbar = tqdm(range(args.max_episode_length))
@@ -157,6 +169,7 @@ for episode in tqdm(
                 ep_dones.append(done)
                 total_reward += reward
                 observation = next_observation
+                throttle_history.append(float(action[0][1].cpu()))
                 if hasattr(env, 'last_cte') and not args.human_override:
                     cte_history.append(abs(env.last_cte))
                 if done:
@@ -182,7 +195,8 @@ for episode in tqdm(
             break
 
     ep_len = t + 1
-    cte_arr = np.array(cte_history) if cte_history else np.array([0.0])
+    cte_arr      = np.array(cte_history)      if cte_history      else np.array([0.0])
+    throttle_arr = np.array(throttle_history) if throttle_history else np.array([args.throttle_base])
     metrics['steps'].append(t + metrics['steps'][-1])
     metrics['episodes'].append(episode)
     metrics['train_rewards'].append(total_reward)
@@ -198,6 +212,7 @@ for episode in tqdm(
         round(float(cte_arr.max()), 4),
         round(float(cte_arr.std()), 4),
         round(ep_len / args.max_episode_length, 4),
+        round(float(throttle_arr.mean()), 4),
         # world model losses (mean over gradient steps this episode)
         round(float(np.mean(losses[0])), 4),
         round(float(np.mean(losses[2])), 4),
