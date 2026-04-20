@@ -18,9 +18,12 @@ venv/
 # Training outputs
 results/*
 !results/.gitkeep
+models/*
+!models/.gitkeep
 checkpoints/
 *.pth
 *.pt
+*.tflite
 
 # Logs
 *.log

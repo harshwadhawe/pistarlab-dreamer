@@ -22,8 +22,11 @@ import torch.nn.functional as F
 import litert_torch
 
 sys.path.insert(0, '.')
+from dreamer.config import load_config
 from dreamer.models.world_model import TransitionModel
 from dreamer.models.policy import ActorModel
+
+_cfg = load_config('real')
 
 
 class PlainEncoder(nn.Module):
@@ -57,7 +60,7 @@ class InferenceGraph(nn.Module):
 
     Stateless — caller tracks belief/state between steps.
     Deterministic: uses posterior mean (no sampling) for stable TFLite export.
-    Assumes fix_speed=True: outputs [steering, throttle_base].
+    Supports fix_speed=True (steering only, fixed throttle) and False (variable throttle).
     """
 
     def __init__(self, encoder, transition, actor):
@@ -86,24 +89,33 @@ class InferenceGraph(nn.Module):
         post_mean, _ = torch.chunk(post_out, 2, dim=1)
         new_state = post_mean                                 # deterministic
 
-        # --- Actor (deterministic mode, fix_speed=True) ---
+        # --- Actor (deterministic) ---
         ah = self.actor.act_fn(self.actor.fc1(torch.cat([new_belief, new_state], dim=-1)))
         ah = self.actor.act_fn(self.actor.fc2(ah))
         ah = self.actor.act_fn(self.actor.fc3(ah))
         ah = self.actor.act_fn(self.actor.fc4(ah))
         ah = self.actor.fc5(ah)
-        raw_mean, _ = torch.chunk(ah, 2, dim=-1)             # steering only
+        raw_mean, _ = torch.chunk(ah, 2, dim=-1)
         scaled_mean = self.actor.mean_scale * torch.tanh(raw_mean / self.actor.mean_scale)
-        # Transform: AffineTransform(0,2) → Sigmoid → AffineTransform(-1,2)
-        steering = 2.0 * torch.sigmoid(2.0 * scaled_mean) - 1.0   # [-1, 1]
-        throttle = torch.full_like(steering, self.actor.throttle_base)
-        action = torch.cat([steering, throttle], dim=-1)     # [1, 2]
+        # Shared transforms: AffineTransform(0,2) → Sigmoid → AffineTransform(-1,2) → [-1,1]
+        x = 2.0 * torch.sigmoid(2.0 * scaled_mean) - 1.0
+
+        if self.actor.fix_speed:
+            # x is [1,1] steering; append fixed throttle
+            throttle = torch.full_like(x, self.actor.throttle_base)
+            action = torch.cat([x, throttle], dim=-1)        # [1, 2]
+        else:
+            # x is [1,2] [steering, throttle_normalised]; rescale throttle to [min,max]
+            loc   = torch.tensor([0.0, self.actor.throttle_loc],   dtype=x.dtype, device=x.device)
+            scale = torch.tensor([1.0, self.actor.throttle_scale], dtype=x.dtype, device=x.device)
+            action = x * scale + loc                         # [1, 2]
 
         return action, new_belief, new_state
 
 
 def build_models(channels, belief_size, state_size, action_size,
-                 embedding_size, hidden_size, fix_speed, throttle_base):
+                 embedding_size, hidden_size, fix_speed, throttle_base,
+                 throttle_min, throttle_max):
     encoder = PlainEncoder(
         embedding_size=embedding_size,
         channels=channels,
@@ -124,13 +136,16 @@ def build_models(channels, belief_size, state_size, action_size,
         hidden_size=hidden_size,
         fix_speed=fix_speed,
         throttle_base=throttle_base,
+        throttle_min=throttle_min,
+        throttle_max=throttle_max,
     ).eval()
 
     return encoder, transition, actor
 
 
 def export(checkpoint_path, output_path, channels, belief_size, state_size,
-           action_size, embedding_size, hidden_size, fix_speed, throttle_base):
+           action_size, embedding_size, hidden_size, fix_speed, throttle_base,
+           throttle_min, throttle_max):
 
     print(f'\n{"─"*52}')
     print(f'[TFLite] Exporting checkpoint → {output_path}')
@@ -141,6 +156,7 @@ def export(checkpoint_path, output_path, channels, belief_size, state_size,
     encoder, transition, actor = build_models(
         channels, belief_size, state_size, action_size,
         embedding_size, hidden_size, fix_speed, throttle_base,
+        throttle_min, throttle_max,
     )
 
     encoder.load_state_dict(ckpt['encoder'])
@@ -173,14 +189,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('checkpoint',      help='Path to models_N.pth checkpoint')
     parser.add_argument('--output',        default='inference.tflite')
-    parser.add_argument('--channels',      type=int,   default=1,    help='1=grayscale, 3=RGB')
-    parser.add_argument('--belief-size',   type=int,   default=200)
-    parser.add_argument('--state-size',    type=int,   default=30)
-    parser.add_argument('--action-size',   type=int,   default=2)
-    parser.add_argument('--embedding-size',type=int,   default=1024)
-    parser.add_argument('--hidden-size',   type=int,   default=300)
-    parser.add_argument('--fix-speed',     action='store_true', default=True)
-    parser.add_argument('--throttle-base', type=float, default=0.3)
+    parser.add_argument('--channels',      type=int,   default=_cfg.channels,        help='1=grayscale, 3=RGB')
+    parser.add_argument('--belief-size',   type=int,   default=_cfg.belief_size)
+    parser.add_argument('--state-size',    type=int,   default=_cfg.state_size)
+    parser.add_argument('--action-size',   type=int,   default=_cfg.action_size)
+    parser.add_argument('--embedding-size',type=int,   default=_cfg.embedding_size)
+    parser.add_argument('--hidden-size',   type=int,   default=_cfg.hidden_size)
+    parser.add_argument('--fix-speed',     action='store_true', default=_cfg.fix_speed)
+    parser.add_argument('--throttle-base', type=float, default=_cfg.throttle_base)
+    parser.add_argument('--throttle-min',  type=float, default=_cfg.throttle_min)
+    parser.add_argument('--throttle-max',  type=float, default=_cfg.throttle_max)
     args = parser.parse_args()
 
     export(
@@ -194,4 +212,6 @@ if __name__ == '__main__':
         hidden_size=args.hidden_size,
         fix_speed=args.fix_speed,
         throttle_base=args.throttle_base,
+        throttle_min=args.throttle_min,
+        throttle_max=args.throttle_max,
     )

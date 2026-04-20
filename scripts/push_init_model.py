@@ -46,6 +46,9 @@ parser.add_argument('--action-size',   type=int,   default=cfg.action_size)
 parser.add_argument('--embedding-size',type=int,   default=cfg.embedding_size)
 parser.add_argument('--hidden-size',   type=int,   default=cfg.hidden_size)
 parser.add_argument('--throttle-base', type=float, default=cfg.throttle_base)
+parser.add_argument('--throttle-min',  type=float, default=cfg.throttle_min)
+parser.add_argument('--throttle-max',  type=float, default=cfg.throttle_max)
+parser.add_argument('--fix-speed',     action='store_true', default=cfg.fix_speed)
 args = parser.parse_args()
 
 print(
@@ -62,7 +65,7 @@ def _make_ckpt(channels):
         'observation_model': VisualObservationModel(args.belief_size, args.state_size, args.embedding_size, channels=channels).state_dict(),
         'reward_model':      RewardModel(args.belief_size, args.state_size, args.hidden_size).state_dict(),
         'encoder':           VisualEncoder(args.embedding_size, channels=channels).state_dict(),
-        'actor_model':       ActorModel(args.action_size, args.belief_size, args.state_size, args.hidden_size, fix_speed=True, throttle_base=args.throttle_base).state_dict(),
+        'actor_model':       ActorModel(args.action_size, args.belief_size, args.state_size, args.hidden_size, fix_speed=args.fix_speed, throttle_base=args.throttle_base, throttle_min=args.throttle_min, throttle_max=args.throttle_max).state_dict(),
         'value_model':       ValueModel(args.belief_size, args.state_size, args.hidden_size).state_dict(),
         'value_model2':      ValueModel(args.belief_size, args.state_size, args.hidden_size).state_dict(),
         'world_optimizer': {}, 'actor_optimizer': {}, 'value_optimizer': {},
@@ -82,7 +85,11 @@ def _export_tflite(ckpt_path, channels):
         '--embedding-size', str(args.embedding_size),
         '--hidden-size',    str(args.hidden_size),
         '--throttle-base',  str(args.throttle_base),
+        '--throttle-min',   str(args.throttle_min),
+        '--throttle-max',   str(args.throttle_max),
     ]
+    if args.fix_speed:
+        cmd.append('--fix-speed')
     print(f'[Init] Exporting TFLite (channels={channels})...')
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:

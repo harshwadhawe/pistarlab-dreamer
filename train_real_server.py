@@ -39,18 +39,20 @@ print(
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-run_name  = f'{args.experiment_name}_{timestamp}' if args.experiment_name else timestamp
+timestamp  = datetime.now().strftime('%Y%m%d_%H%M%S')
+run_name   = f'{args.experiment_name}_{timestamp}' if args.experiment_name else timestamp
 run_dir    = os.path.join(args.results_dir, run_name)
 images_dir = os.path.join(run_dir, 'images')
+models_dir = os.path.join('models', args.experiment_name if args.experiment_name else run_name)
 os.makedirs(run_dir,    exist_ok=True)
 os.makedirs(images_dir, exist_ok=True)
+os.makedirs(models_dir, exist_ok=True)
 
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
 setup_device(args)
-print(f'[Server] Device: {args.device}  run → {run_dir}')
+print(f'[Server] Device: {args.device}  run → {run_dir}  models → {models_dir}')
 
 csv_path = os.path.join(run_dir, 'rewards.csv')
 csv_file = open(csv_path, 'w', newline='')
@@ -83,13 +85,11 @@ publisher = ModelPublisher(bind_ip=args.bind_ip)
 # ---------------------------------------------------------------------------
 # TFLite export
 # ---------------------------------------------------------------------------
-def export_and_publish(episode_count: int) -> None:
+def export_and_publish(episode_count: int) -> str | None:
+    """Export TFLite, update models_dir/latest, serve to Pi. Returns tflite path or None."""
     label     = 'rgb' if args.channels == 3 else 'grayscale'
     ckpt_path = os.path.join(run_dir, f'inference_weights_{episode_count}.pth')
-    # Archived copy in run_dir + latest in models/ for Pi fixed-path lookup
-    tflite_run    = os.path.join(run_dir,    f'inference_{label}_{episode_count}.tflite')
-    tflite_latest = os.path.join('models',   f'inference_{label}.tflite')
-    os.makedirs('models', exist_ok=True)
+    tflite_run = os.path.join(run_dir, f'inference_{label}_{episode_count}.tflite')
 
     agent.save_inference_checkpoint(ckpt_path)
 
@@ -103,19 +103,25 @@ def export_and_publish(episode_count: int) -> None:
         '--embedding-size', str(args.embedding_size),
         '--hidden-size',    str(args.hidden_size),
         '--throttle-base',  str(args.throttle_base),
+        '--throttle-min',   str(args.throttle_min),
+        '--throttle-max',   str(args.throttle_max),
     ]
+    if args.fix_speed:
+        cmd.append('--fix-speed')
     print(f'[Server] Exporting TFLite {label} (episode {episode_count})...')
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         print(f'[Server] Export FAILED:\n{result.stderr}')
-        return
+        return None
     print(result.stdout.strip())
 
-    # Copy to models/ so Pi always has a fixed path to pull from
-    shutil.copy2(tflite_run, tflite_latest)
-    print(f'[Server] Latest model → {tflite_latest}')
+    # models/<experiment>/latest — named copy for easy access
+    shutil.copy2(tflite_run, os.path.join(models_dir, f'inference_{label}_latest.tflite'))
+    # models/inference_{label}.tflite — top-level fixed path the Pi polls via HTTP
+    shutil.copy2(tflite_run, os.path.join('models', f'inference_{label}.tflite'))
 
     publisher.publish(tflite_run, step=agent.D.steps)
+    return tflite_run
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +130,7 @@ def export_and_publish(episode_count: int) -> None:
 def save_checkpoint(episode_count: int) -> None:
     path = os.path.join(run_dir, f'models_{episode_count}.pth')
     agent.save_checkpoint(path)
+    agent.save_checkpoint(os.path.join(models_dir, 'latest.pth'))
     torch.save(agent.D, os.path.join(run_dir, 'experience.pth'))
     agent.save_reconstruction(images_dir, episode_count, args.episodes)
     print(f'[Server] Checkpoint saved → {path}')
@@ -136,6 +143,7 @@ print(f'\n[Server] Waiting for episodes from car. '
       f'Training starts after {args.seed_episodes} seed episodes.\n')
 
 episode_count = 0
+best_reward   = float('-inf')
 
 while episode_count < args.episodes:
     print(f'[Server] Waiting for episode {episode_count + 1}/{args.episodes}...')
@@ -191,7 +199,14 @@ while episode_count < args.episodes:
         print(f'[Server] Baseline reconstruction saved → {images_dir}/ep_000.png')
         export_and_publish(episode_count)
     elif episode_count > args.seed_episodes:
-        export_and_publish(episode_count)
+        tflite_path = export_and_publish(episode_count)
+        if total_reward > best_reward:
+            best_reward = total_reward
+            agent.save_checkpoint(os.path.join(models_dir, 'best.pth'))
+            label = 'rgb' if args.channels == 3 else 'grayscale'
+            if tflite_path:
+                shutil.copy2(tflite_path, os.path.join(models_dir, f'inference_{label}_best.tflite'))
+            print(f'[Server] New best: {best_reward:.2f} → {models_dir}/best.pth')
 
     if episode_count % args.checkpoint_interval == 0:
         save_checkpoint(episode_count)

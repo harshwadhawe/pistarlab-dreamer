@@ -28,12 +28,14 @@ print(
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-run_name  = f'{args.experiment_name}_{timestamp}' if args.experiment_name else timestamp
+timestamp  = datetime.now().strftime('%Y%m%d_%H%M%S')
+run_name   = f'{args.experiment_name}_{timestamp}' if args.experiment_name else timestamp
 run_dir    = os.path.join('results', args.env, str(args.seed), run_name)
 images_dir = os.path.join(run_dir, 'images')
+models_dir = os.path.join('models', args.experiment_name if args.experiment_name else run_name)
 os.makedirs(run_dir,    exist_ok=True)
 os.makedirs(images_dir, exist_ok=True)
+os.makedirs(models_dir, exist_ok=True)
 
 csv_path  = os.path.join(run_dir, 'rewards.csv')
 csv_file  = open(csv_path, 'w', newline='')
@@ -45,12 +47,15 @@ csv_writer.writerow([
 ])
 csv_file.flush()
 print(f'Logging rewards to {csv_path}')
+print(f'Models       → {models_dir}/')
 
 random.seed(args.seed)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
 setup_device(args)
+
+best_reward = float('-inf')
 
 metrics = {
     'steps': [], 'episodes': [], 'train_rewards': [],
@@ -232,9 +237,16 @@ for episode in tqdm(
         metrics['episodes'][-1], metrics['steps'][-1], metrics['train_rewards'][-1]
     ))
 
+    # --- Best model ---
+    if total_reward > best_reward:
+        best_reward = total_reward
+        agent.save_checkpoint(os.path.join(models_dir, 'best.pth'))
+        print(f'[Sim] New best: {best_reward:.2f} → {models_dir}/best.pth')
+
     # --- Checkpoint ---
     if episode % args.checkpoint_interval == 0:
         agent.save_checkpoint(os.path.join(run_dir, 'models_%d.pth' % episode))
+        agent.save_checkpoint(os.path.join(models_dir, 'latest.pth'))
         agent.save_reconstruction(images_dir, episode, args.episodes)
         if args.checkpoint_experience:
             torch.save(agent.D, os.path.join(run_dir, 'experience.pth'))

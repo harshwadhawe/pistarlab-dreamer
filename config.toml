@@ -8,7 +8,7 @@
 [common]
 
 # ── Experiment identity ── (change these most often) ──────────────────────────
-experiment_name       = ""          # tag appended to rewards CSV; empty = timestamp
+experiment_name       = "SIM_RGB_NOAUG_FLIP_FIXSPEED"          # tag appended to rewards CSV; empty = timestamp
 seed                  = 42
 
 # ── Observation ───────────────────────────────────────────────────────────────
@@ -16,7 +16,7 @@ grayscale             = false       # true → 1-channel, false → 3-channel RG
 
 # ── Augmentation ──────────────────────────────────────────────────────────────
 augment               = false       # DrQ pixel augmentation
-hflip                 = false       # append horizontally-flipped copy of each episode
+hflip                 = true       # append horizontally-flipped copy of each episode
 
 # Augmentation parameters (only used when augment=true)
 aug_brightness        = 0.3         # ±brightness shift  (tuned from IL)
@@ -99,7 +99,7 @@ disable_cuda          = false
 # ── Experiment ── (change these most often) ───────────────────────────────────
 env                   = "donkey-generated-track-v0"
 hflip                 = true
-fix_speed             = false       # variable throttle [0.1, 0.5]
+fix_speed             = true       # variable throttle [0.1, 0.5]
 
 # ── Run length ────────────────────────────────────────────────────────────────
 episodes              = 1000
