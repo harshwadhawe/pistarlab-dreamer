@@ -7,6 +7,29 @@
 
 [common]
 
+# ── Experiment identity ── (change these most often) ──────────────────────────
+experiment_name       = ""          # tag appended to rewards CSV; empty = timestamp
+seed                  = 42
+
+# ── Observation ───────────────────────────────────────────────────────────────
+grayscale             = false       # true → 1-channel, false → 3-channel RGB
+
+# ── Augmentation ──────────────────────────────────────────────────────────────
+augment               = false       # DrQ pixel augmentation
+hflip                 = false       # append horizontally-flipped copy of each episode
+
+# ── DonkeyCar action constraints ─────────────────────────────────────────────
+fix_speed             = true        # true → steering only; false → variable throttle
+throttle_base         = 0.3         # fixed throttle when fix_speed=true
+throttle_min          = 0.1
+throttle_max          = 0.5
+angle_min             = -1.0
+angle_max             = 1.0
+
+# ── Resume (leave empty to start fresh) ──────────────────────────────────────
+models                = ""
+experience_replay     = ""
+
 # ── Architecture ──────────────────────────────────────────────────────────────
 embedding_size        = 1024
 hidden_size           = 300
@@ -47,69 +70,51 @@ kl_balance            = true
 symlog_rewards        = true
 return_norm           = true
 
-# ── DonkeyCar action constraints ─────────────────────────────────────────────
-fix_speed             = true
-throttle_base         = 0.3
-throttle_min          = 0.1
-throttle_max          = 0.5
-angle_min             = -1.0
-angle_max             = 1.0
-
-# ── Observation ───────────────────────────────────────────────────────────────
-grayscale             = false   # true → 1-channel, false → 3-channel RGB
-
-# ── Reproducibility ───────────────────────────────────────────────────────────
-seed                  = 42
-disable_cuda          = false
-
 # ── Smoothing ─────────────────────────────────────────────────────────────────
 smooth_weight         = 0.0         # steering jitter penalty (0 = off)
-smooth_window         = 10          # rolling window for std dev
+smooth_window         = 10
 
-# ── Experiment identity ───────────────────────────────────────────────────────
-experiment_name       = ""          # tag appended to rewards CSV name; empty = timestamp
-
-# ── Resume (leave empty to start fresh) ──────────────────────────────────────
-models            = ""
-experience_replay = ""
+# ── Misc ──────────────────────────────────────────────────────────────────────
+disable_cuda          = false
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 [sim]
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Experiment ── (change these most often) ───────────────────────────────────
 env                   = "donkey-generated-track-v0"
+augment               = false
+hflip                 = true
+fix_speed             = false       # variable throttle [0.1, 0.5]
+
+# ── Run length ────────────────────────────────────────────────────────────────
 episodes              = 1000
 experience_size       = 1000000
 max_episode_length    = 1000
 
-# Simulator connection
+# ── Simulator connection ──────────────────────────────────────────────────────
 sim_path              = "self"      # "self" = manually launched sim
 host                  = "127.0.0.1"
 port                  = 9091
 
-# Human override (keyboard controls episode outcome)
+# ── Human override ────────────────────────────────────────────────────────────
 human_override        = true
-fix_speed             = false       # variable throttle [0.1, 0.5]
 
-# Episode termination
+# ── Episode termination ───────────────────────────────────────────────────────
 max_cte               = 4.0
 stuck_speed_threshold = 0.1
 stuck_steps_limit     = 15
 
-# Reward (human_override=true path only)
+# ── Reward (human_override=true path only) ────────────────────────────────────
 survival_bonus        = 0.5        # added to throttle each step when not terminated
 
-# Augmentation
-augment               = false
-hflip                 = true
-
-# Evaluation
+# ── Evaluation ────────────────────────────────────────────────────────────────
 test                  = false
 test_interval         = 5
 test_episodes         = 1
 
-# Checkpointing
+# ── Checkpointing ─────────────────────────────────────────────────────────────
 checkpoint_interval   = 500
 checkpoint_experience = false
 
@@ -119,29 +124,32 @@ checkpoint_experience = false
 # train_sim_automated.py — headless ablation experiments, no keyboard needed
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Experiment ── (change these most often) ───────────────────────────────────
 env                   = "donkey-generated-track-v0"
-episodes              = 20
-experience_size       = 100000
-max_episode_length    = 1000
-
-sim_path              = "self"
-host                  = "127.0.0.1"
-port                  = 9091
-
+experiment_name       = "baseline"  # overrides [common] empty default
+seed                  = 1           # change per run: 1, 2, 3
 augment               = false
-experiment_name       = "baseline"   # overrides [common] empty default
-seed                  = 1            # change per run: 1, 2, 3
 
-# Ablation flags — inherited from [common]; add overrides here to flip ONE at a time
+# Ablation flags — inherited from [common]; uncomment + flip ONE at a time
 # kl_balance          = false
 # symlog_rewards      = false
 # return_norm         = false
 
-# Evaluation
+# ── Run length ────────────────────────────────────────────────────────────────
+episodes              = 20
+experience_size       = 100000
+max_episode_length    = 1000
+
+# ── Simulator connection ──────────────────────────────────────────────────────
+sim_path              = "self"
+host                  = "127.0.0.1"
+port                  = 9091
+
+# ── Evaluation ────────────────────────────────────────────────────────────────
 test_interval         = 5
 test_episodes         = 1
 
-# Checkpointing
+# ── Checkpointing ─────────────────────────────────────────────────────────────
 checkpoint_interval   = 10
 checkpoint_experience = false
 
@@ -151,19 +159,23 @@ checkpoint_experience = false
 # train_real_server.py — runs on Mac/Linux
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Experiment ── (change these most often) ───────────────────────────────────
+augment               = true
+hflip                 = true
+grayscale             = false       # must match the exported TFLite model
+
+# ── Run length ────────────────────────────────────────────────────────────────
 episodes              = 500
 experience_size       = 50000       # ~230 MB for RGB
 results_dir           = "results/real"
 
-# Augmentation on by default for sim-to-real transfer
-augment               = true
-hflip                 = true
+# ── Policy ────────────────────────────────────────────────────────────────────
 expl_amount           = 0.0         # TFLite inference is deterministic
 
-# Car communication
+# ── Car communication ─────────────────────────────────────────────────────────
 bind_ip               = "*"         # bind to all interfaces
 
-# Model/checkpoint cadence
+# ── Model/checkpoint cadence ──────────────────────────────────────────────────
 push_interval         = 1           # export + push TFLite every N episodes
 checkpoint_interval   = 50
 smooth_weight         = 0.1         # override: real car needs more smoothing than sim
