@@ -401,17 +401,24 @@ class Dreamer:
     # Distributed rollout helpers
     # ------------------------------------------------------------------
 
-    def save_reconstruction(self, images_dir: str, episode: int, total_episodes: int,
-                            n_show: int = 5, max_keep: int = 5) -> None:
-        """Sample a replay batch, reconstruct via world model, save real/pred grid.
+    def pin_reconstruction_sequences(self, obs, actions, nonterminals) -> None:
+        """Fix sequences sampled at the start of training for consistent decoder tracking."""
+        self._pinned = (obs, actions, nonterminals)
 
-        Grid layout: real observations (top row) | reconstructions (bottom row), n_show columns.
-        Saves ep_NNN.png (zero-padded to total_episodes width) and latest.png.
-        Prunes episode images to max_keep randomly selected files.
+    def save_reconstruction(self, images_dir: str, episode: int, total_episodes: int) -> None:
+        """Reconstruct pinned sequences and save real/pred grid.
+
+        Grid layout: real (top row) | reconstructed (bottom row).
+        Saves ep_NNN.png and latest.png. All episode images are kept so
+        the full decoder improvement progression is visible.
         """
+        if not hasattr(self, '_pinned'):
+            return
+        obs, actions, nonterminals = self._pinned
+        n_show = obs.shape[1]
+
         self.set_eval_mode()
         with torch.no_grad():
-            obs, actions, _, nonterminals = self.D.sample(n_show, self.args.chunk_size)
             init_b = torch.zeros(n_show, self.args.belief_size, device=self.args.device)
             init_s = torch.zeros(n_show, self.args.state_size,  device=self.args.device)
             beliefs, _, _, _, post_states, _, _ = self.transition_model(
@@ -420,24 +427,15 @@ class Dreamer:
                 nonterminals[:-1],
             )
             recon = bottle(self.observation_model, (beliefs, post_states))
-            # Pick the middle timestep from each sequence — representative, not first/last
-            mid = self.args.chunk_size // 2
-            real = (obs[mid, :n_show] + 0.5).clamp(0, 1)   # [n_show, C, H, W]
+            mid  = self.args.chunk_size // 2
+            real = (obs[mid, :n_show] + 0.5).clamp(0, 1)
             pred = (recon[mid - 1, :n_show] + 0.5).clamp(0, 1)
             grid = make_grid(torch.cat([real, pred], dim=0), nrow=n_show)
         self.set_train_mode()
 
-        ep_str  = str(episode).zfill(len(str(total_episodes)))
-        ep_path = os.path.join(images_dir, f'ep_{ep_str}.png')
-        save_image(grid, ep_path)
+        ep_str = str(episode).zfill(len(str(total_episodes)))
+        save_image(grid, os.path.join(images_dir, f'ep_{ep_str}.png'))
         save_image(grid, os.path.join(images_dir, 'latest.png'))
-
-        imgs = [f for f in os.listdir(images_dir) if f.startswith('ep_') and f.endswith('.png')]
-        if len(imgs) > max_keep:
-            keep = set(np.random.choice(imgs, max_keep, replace=False))
-            for f in imgs:
-                if f not in keep:
-                    os.remove(os.path.join(images_dir, f))
 
     def set_train_mode(self):
         for m in (self.transition_model, self.observation_model, self.reward_model,

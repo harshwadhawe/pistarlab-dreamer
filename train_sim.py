@@ -109,6 +109,13 @@ elif not args.test:
         )
         metrics['episodes'].append(s)  # s is 1-based
 
+# Pin 5 sequences from the seed buffer for consistent decoder tracking.
+# These same frames are reconstructed at every checkpoint to show improvement.
+_pin_obs, _pin_actions, _, _pin_nonterminals = agent.D.sample(5, args.chunk_size)
+agent.pin_reconstruction_sequences(_pin_obs, _pin_actions, _pin_nonterminals)
+agent.save_reconstruction(images_dir, 0, args.episodes)  # ep_000 = before any training
+print(f'[Sim] Pinned 5 sequences for decoder tracking → {images_dir}/ep_000.png')
+
 # ---------------------------------------------------------------------------
 # Training loop
 # ---------------------------------------------------------------------------
@@ -228,6 +235,7 @@ for episode in tqdm(
     # --- Checkpoint ---
     if episode % args.checkpoint_interval == 0:
         agent.save_checkpoint(os.path.join(run_dir, 'models_%d.pth' % episode))
+        agent.save_reconstruction(images_dir, episode, args.episodes)
         if args.checkpoint_experience:
             torch.save(agent.D, os.path.join(run_dir, 'experience.pth'))
 
