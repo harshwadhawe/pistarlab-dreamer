@@ -1,6 +1,9 @@
 """
 Export both RGB and grayscale TFLite models and serve them to the Pi via HTTP.
 
+Architecture values are read from config.toml [common]. No flags needed
+unless you want to override a specific value.
+
 Run on the SERVER once. The Pi runs pull_init_model.py simultaneously.
 After this, the Pi has models/inference_rgb.tflite and models/inference_grayscale.tflite
 and never needs to run init scripts again — train_real_pi.py auto-selects.
@@ -10,7 +13,7 @@ Usage:
   python scripts/push_init_model.py
 
   # Bootstrap from a sim/real checkpoint:
-  python scripts/push_init_model.py --models results/real/export_weights_12.pth
+  python scripts/push_init_model.py --models results/real/.../models_50.pth
 """
 
 import argparse
@@ -25,21 +28,31 @@ import threading
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+from dreamer.config import load_config
 from dreamer.comms import MODEL_HTTP_PORT
 from dreamer.models.world_model import TransitionModel, VisualObservationModel, RewardModel, VisualEncoder
 from dreamer.models.policy import ActorModel, ValueModel
 
+cfg = load_config('real')
+
 parser = argparse.ArgumentParser()
-parser.add_argument('--models',        type=str, default='',
+parser.add_argument('--models',        type=str,   default='',
                     help='Path to .pth checkpoint. If empty, random init weights are used.')
-parser.add_argument('--bind_ip',       type=str, default='')
-parser.add_argument('--belief-size',   type=int, default=200)
-parser.add_argument('--state-size',    type=int, default=30)
-parser.add_argument('--action-size',   type=int, default=2)
-parser.add_argument('--embedding-size',type=int, default=1024)
-parser.add_argument('--hidden-size',   type=int, default=300)
-parser.add_argument('--throttle-base', type=float, default=0.3)
+parser.add_argument('--bind_ip',       type=str,   default='')
+# Architecture overrides — defaults come from config.toml [common]
+parser.add_argument('--belief-size',   type=int,   default=cfg.belief_size)
+parser.add_argument('--state-size',    type=int,   default=cfg.state_size)
+parser.add_argument('--action-size',   type=int,   default=cfg.action_size)
+parser.add_argument('--embedding-size',type=int,   default=cfg.embedding_size)
+parser.add_argument('--hidden-size',   type=int,   default=cfg.hidden_size)
+parser.add_argument('--throttle-base', type=float, default=cfg.throttle_base)
 args = parser.parse_args()
+
+print(
+    f'[Init] Config — belief={args.belief_size} state={args.state_size} '
+    f'embed={args.embedding_size} hidden={args.hidden_size} '
+    f'throttle={args.throttle_base}'
+)
 
 
 def _make_ckpt(channels):
