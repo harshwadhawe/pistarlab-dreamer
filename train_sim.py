@@ -28,14 +28,15 @@ print(
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
-results_dir = os.path.join('results', args.env, str(args.seed))
-images_dir  = os.path.join(results_dir, 'images')
-os.makedirs(results_dir, exist_ok=True)
-os.makedirs(images_dir,  exist_ok=True)
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+run_name  = f'{args.experiment_name}_{timestamp}' if args.experiment_name else timestamp
+run_dir    = os.path.join('results', args.env, str(args.seed), run_name)
+images_dir = os.path.join(run_dir, 'images')
+os.makedirs(run_dir,    exist_ok=True)
+os.makedirs(images_dir, exist_ok=True)
 
-run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
-csv_path = os.path.join(results_dir, f'rewards_{run_id}.csv')
-csv_file = open(csv_path, 'w', newline='')
+csv_path  = os.path.join(run_dir, 'rewards.csv')
+csv_file  = open(csv_path, 'w', newline='')
 csv_writer = csv.writer(csv_file)
 csv_writer.writerow([
     'episode', 'steps', 'reward',
@@ -226,9 +227,9 @@ for episode in tqdm(
 
     # --- Checkpoint ---
     if episode % args.checkpoint_interval == 0:
-        agent.save_checkpoint(os.path.join(results_dir, 'models_%d.pth' % episode))
+        agent.save_checkpoint(os.path.join(run_dir, 'models_%d.pth' % episode))
         if args.checkpoint_experience:
-            torch.save(agent.D, os.path.join(results_dir, 'experience.pth'))
+            torch.save(agent.D, os.path.join(run_dir, 'experience.pth'))
 
 env.close()
 csv_file.close()
