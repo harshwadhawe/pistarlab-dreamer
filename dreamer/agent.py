@@ -204,7 +204,7 @@ class Dreamer:
             self._norm_step += 1
             if self._norm_step % 10 == 1:
                 with torch.no_grad():
-                    flat = returns.flatten()
+                    flat = returns.flatten().cpu()  # kthvalue unsupported on MPS
                     n = flat.numel()
                     p5  = torch.kthvalue(flat, max(1, int(0.05 * n))).values.item()
                     p95 = torch.kthvalue(flat, max(1, int(0.95 * n))).values.item()
