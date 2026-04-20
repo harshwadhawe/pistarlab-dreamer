@@ -29,18 +29,18 @@ import torch.nn.functional as F
 class Augmenter:
     def __init__(
         self,
-        brightness=0.2,
-        contrast=0.2,
-        shadow_prob=0.5,
-        shadow_intensity=0.4,
-        blur_prob=0.3,
-        blur_kernel=5,
-        noise_std=0.02,
-        gamma_range=(0.7, 1.4),
-        erase_prob=0.2,
-        erase_max_frac=0.2,
-        crop_frac=0.9,
-        device='cpu',
+        brightness,
+        contrast,
+        shadow_prob,
+        shadow_intensity,
+        blur_prob,
+        blur_kernel,
+        noise_std,
+        gamma_range,
+        erase_prob,
+        erase_max_frac,
+        crop_frac,
+        device,
     ):
         self.brightness       = brightness
         self.contrast         = contrast

@@ -102,7 +102,20 @@ class Dreamer:
             args.action_size, args.device,
         )
 
-        self.augmenter = Augmenter(device=args.device) if args.augment else None
+        self.augmenter = Augmenter(
+            brightness=args.aug_brightness,
+            contrast=args.aug_contrast,
+            shadow_prob=args.aug_shadow_prob,
+            shadow_intensity=args.aug_shadow_intensity,
+            blur_prob=args.aug_blur_prob,
+            blur_kernel=args.aug_blur_kernel,
+            noise_std=args.aug_noise_std,
+            gamma_range=(args.aug_gamma_lo, args.aug_gamma_hi),
+            erase_prob=args.aug_erase_prob,
+            erase_max_frac=args.aug_erase_max_frac,
+            crop_frac=args.aug_crop_frac,
+            device=args.device,
+        ) if args.augment else None
 
         world_params  = sum(np.prod(p.shape) for p in self.world_param)
         actor_params  = sum(np.prod(p.shape) for p in self.actor_model.parameters())
