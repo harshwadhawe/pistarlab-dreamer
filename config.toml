@@ -34,7 +34,7 @@ aug_crop_frac         = 0.9         # crop to this fraction then resize back
 
 # ── DonkeyCar action constraints ─────────────────────────────────────────────
 fix_speed             = true        # true → steering only; false → variable throttle
-throttle_base         = 0.25          # fixed throttle when fix_speed=true
+throttle_base         = 0.28         # fixed throttle when fix_speed=true
 throttle_min          = 0.1
 throttle_max          = 0.5
 angle_min             = -1.0
@@ -45,10 +45,10 @@ models                = ""
 experience_replay     = ""
 
 # ── Architecture ──────────────────────────────────────────────────────────────
-embedding_size        = 1024
-hidden_size           = 300
-belief_size           = 200
-state_size            = 30
+embedding_size        = 512
+hidden_size           = 200
+belief_size           = 128
+state_size            = 20
 action_size           = 2
 cnn_act               = "relu"
 dense_act             = "elu"
