@@ -243,6 +243,10 @@ for episode in tqdm(
         agent.save_checkpoint(os.path.join(models_dir, 'best.pth'))
         print(f'[Sim] New best: {best_reward:.2f} → {models_dir}/best.pth')
 
+    # --- Reconstruction image every 5 episodes ---
+    if episode % 5 == 0:
+        agent.save_reconstruction(images_dir, episode, args.episodes)
+
     # --- Checkpoint ---
     if episode % args.checkpoint_interval == 0:
         agent.save_checkpoint(os.path.join(run_dir, 'models_%d.pth' % episode))

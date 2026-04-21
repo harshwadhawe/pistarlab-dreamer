@@ -8,7 +8,7 @@
 [common]
 
 # ── Experiment identity ── (change these most often) ──────────────────────────
-experiment_name       = "REAL_RGB_NOFLIP_NOAUG"          # tag appended to rewards CSV; empty = timestamp
+experiment_name       = "SIM_RGB_HFLIP_NOAUG"          # tag appended to rewards CSV; empty = timestamp
 seed                  = 42
 
 # ── Observation ───────────────────────────────────────────────────────────────
@@ -16,7 +16,7 @@ grayscale             = false       # true → 1-channel, false → 3-channel RG
 
 # ── Augmentation ──────────────────────────────────────────────────────────────
 augment               = false       # DrQ pixel augmentation
-hflip                 = false       # append horizontally-flipped copy of each episode
+hflip                 = true       # append horizontally-flipped copy of each episode
 
 # Augmentation parameters (only used when augment=true)
 aug_brightness        = 0.3         # ±brightness shift  (tuned from IL)
@@ -61,7 +61,7 @@ pcont_scale           = 10
 
 # ── Training ──────────────────────────────────────────────────────────────────
 seed_episodes         = 5
-collect_interval      = 100
+collect_interval      = 50
 batch_size            = 50
 chunk_size            = 50
 world_lr              = 6e-4
