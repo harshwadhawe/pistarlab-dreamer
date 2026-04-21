@@ -8,14 +8,14 @@
 [common]
 
 # ── Experiment identity ── (change these most often) ──────────────────────────
-experiment_name       = "REAL_RGB_NOFLIP"          # tag appended to rewards CSV; empty = timestamp
+experiment_name       = "REAL_RGB_NOFLIP_NOAUG"          # tag appended to rewards CSV; empty = timestamp
 seed                  = 42
 
 # ── Observation ───────────────────────────────────────────────────────────────
 grayscale             = false       # true → 1-channel, false → 3-channel RGB; must match exported TFLite
 
 # ── Augmentation ──────────────────────────────────────────────────────────────
-augment               = true       # DrQ pixel augmentation
+augment               = false       # DrQ pixel augmentation
 hflip                 = false       # append horizontally-flipped copy of each episode
 
 # Augmentation parameters (only used when augment=true)
@@ -34,7 +34,7 @@ aug_crop_frac         = 0.9         # crop to this fraction then resize back
 
 # ── DonkeyCar action constraints ─────────────────────────────────────────────
 fix_speed             = true        # true → steering only; false → variable throttle
-throttle_base         = 0.3          # fixed throttle when fix_speed=true
+throttle_base         = 0.25          # fixed throttle when fix_speed=true
 throttle_min          = 0.1
 throttle_max          = 0.5
 angle_min             = -1.0
