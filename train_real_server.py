@@ -208,6 +208,9 @@ while episode_count < args.episodes:
                 shutil.copy2(tflite_path, os.path.join(models_dir, f'inference_{label}_best.tflite'))
             print(f'[Server] New best: {best_reward:.2f} → {models_dir}/best.pth')
 
+    if episode_count % 5 == 0 and episode_count > args.seed_episodes:
+        agent.save_reconstruction(images_dir, episode_count, args.episodes)
+
     if episode_count % args.checkpoint_interval == 0:
         save_checkpoint(episode_count)
 
