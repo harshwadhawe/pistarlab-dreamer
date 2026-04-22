@@ -43,7 +43,7 @@ timestamp  = datetime.now().strftime('%Y%m%d_%H%M%S')
 run_name   = f'{args.experiment_name}_{timestamp}' if args.experiment_name else timestamp
 run_dir    = os.path.join(args.results_dir, run_name)
 images_dir = os.path.join(run_dir, 'images')
-models_dir = os.path.join('models', args.experiment_name if args.experiment_name else run_name)
+models_dir = os.path.join(run_dir, 'models')
 os.makedirs(run_dir,    exist_ok=True)
 os.makedirs(images_dir, exist_ok=True)
 os.makedirs(models_dir, exist_ok=True)
@@ -115,10 +115,7 @@ def export_and_publish(episode_count: int) -> str | None:
         return None
     print(result.stdout.strip())
 
-    # models/<experiment>/latest — named copy for easy access
     shutil.copy2(tflite_run, os.path.join(models_dir, f'inference_{label}_latest.tflite'))
-    # models/inference_{label}.tflite — top-level fixed path the Pi polls via HTTP
-    shutil.copy2(tflite_run, os.path.join('models', f'inference_{label}.tflite'))
 
     publisher.publish(tflite_run, step=agent.D.steps)
     return tflite_run
