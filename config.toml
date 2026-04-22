@@ -97,7 +97,7 @@ disable_cuda          = false
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Experiment ── (change these most often) ───────────────────────────────────
-env                   = "donkey-generated-track-v0"
+env                   = "donkey-warehouse-v0"
 hflip                 = true
 fix_speed             = true       # variable throttle [0.1, 0.5]
 
@@ -115,7 +115,7 @@ port                  = 9091
 human_override        = true
 
 # ── Episode termination ───────────────────────────────────────────────────────
-cte_left              = 5.0         # --automated only: max CTE toward left (more forgiving)
+cte_left              = 12.0         # --automated only: max CTE toward left (more forgiving)
 cte_right             = 3.0         # --automated only: max CTE toward right (tighter, ref is right lane)
 stuck_speed_threshold = 0.1
 stuck_steps_limit     = 15
