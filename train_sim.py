@@ -1,3 +1,4 @@
+import argparse
 import csv
 import os
 import random
@@ -13,7 +14,13 @@ from dreamer.envs import Env
 from dreamer.agent import Dreamer
 from dreamer.utils import setup_device
 
+_parser = argparse.ArgumentParser(add_help=False)
+_parser.add_argument('--automated', action='store_true',
+                     help='Automated mode: controller-only termination, CTE logged for analysis')
+_cli, _ = _parser.parse_known_args()
+
 args = load_config('sim')
+args.automated = _cli.automated
 
 a = vars(args)
 print(
@@ -22,7 +29,7 @@ print(
     f'         train:  batch={a["batch_size"]} chunk={a["chunk_size"]} collect={a["collect_interval"]} world_lr={a["world_lr"]} actor_lr={a["actor_lr"]}\n'
     f'         policy: horizon={a["planning_horizon"]} discount={a["discount"]} expl={a["expl_amount"]} fix_speed={a["fix_speed"]} throttle={a["throttle_base"]}\n'
     f'         flags:  hflip={a["hflip"]} augment={a["augment"]} kl_balance={a["kl_balance"]} symlog={a["symlog_rewards"]} return_norm={a["return_norm"]}\n'
-    f'         term:   max_cte={a["max_cte"]} stuck_spd={a["stuck_speed_threshold"]} stuck_steps={a["stuck_steps_limit"]}'
+    f'         term:   cte_left={a["cte_left"]} cte_right={a["cte_right"]} stuck_spd={a["stuck_speed_threshold"]} stuck_steps={a["stuck_steps_limit"]}'
 )
 
 # ---------------------------------------------------------------------------
@@ -42,7 +49,7 @@ csv_file  = open(csv_path, 'w', newline='')
 csv_writer = csv.writer(csv_file)
 csv_writer.writerow([
     'episode', 'steps', 'reward',
-    'mean_cte', 'max_cte', 'std_cte', 'survival_rate', 'mean_throttle',
+    'mean_cte', 'max_cte', 'min_cte', 'std_cte', 'survival_rate', 'mean_throttle',
     'obs_loss', 'kl_loss', 'reward_loss', 'actor_loss', 'value_loss',
 ])
 csv_file.flush()
@@ -67,16 +74,17 @@ metrics = {
 controller = None
 if args.human_override:
     from dreamer.envs.controller import EpisodeController
-    controller = EpisodeController.from_keyboard()
+    controller = EpisodeController.from_null() if args.automated else EpisodeController.from_keyboard()
 
 env = Env(args.env, args.seed, args.max_episode_length,
           sim_path=args.sim_path, host=args.host, port=args.port,
           controller=controller, smooth_weight=args.smooth_weight,
           smooth_window=args.smooth_window, channels=args.channels,
-          max_cte=args.max_cte,
+          cte_left=args.cte_left, cte_right=args.cte_right,
           stuck_speed_threshold=args.stuck_speed_threshold,
           stuck_steps_limit=args.stuck_steps_limit,
-          survival_bonus=args.survival_bonus)
+          survival_bonus=args.survival_bonus,
+          cte_terminate=args.automated)
 agent = Dreamer(args)
 
 # ---------------------------------------------------------------------------
@@ -90,7 +98,7 @@ if args.experience_replay != '' and os.path.exists(args.experience_replay):
     )
 elif not args.test:
     for s in range(1, args.seed_episodes + 1):
-        if controller:
+        if controller and not args.automated:
             controller.flush()
             print(f'[Sim] Seed episode {s}/{args.seed_episodes}. Press → Right to start...')
             while True:
@@ -144,7 +152,7 @@ for episode in tqdm(
     metrics['value_loss'].append(losses[5])
 
     # --- Wait for operator before starting episode ---
-    if controller:
+    if controller and not args.automated:
         controller.flush()
         print('[Sim] Training done. Press → Right to start next episode...')
         while True:
@@ -181,8 +189,8 @@ for episode in tqdm(
                 total_reward += reward
                 observation = next_observation
                 throttle_history.append(float(action[0][1].cpu()))
-                if hasattr(env, 'last_cte') and not args.human_override:
-                    cte_history.append(abs(env.last_cte))
+                if hasattr(env, 'last_cte') and (args.automated or not args.human_override):
+                    cte_history.append(env.last_cte)
                 if done:
                     pbar.close()
                     break
@@ -212,15 +220,16 @@ for episode in tqdm(
     metrics['episodes'].append(episode)
     metrics['train_rewards'].append(total_reward)
     metrics['episode_lengths'].append(ep_len)
-    metrics['mean_cte'].append(float(cte_arr.mean()))
+    metrics['mean_cte'].append(float(np.abs(cte_arr).mean()))
 
     csv_writer.writerow([
         episode,
         metrics['steps'][-1],
         round(total_reward, 4),
-        # driving quality
-        round(float(cte_arr.mean()), 4),
+        # driving quality (mean=abs mean, max/min=signed for left/right visibility)
+        round(float(np.abs(cte_arr).mean()), 4),
         round(float(cte_arr.max()), 4),
+        round(float(cte_arr.min()), 4),
         round(float(cte_arr.std()), 4),
         round(ep_len / args.max_episode_length, 4),
         round(float(throttle_arr.mean()), 4),

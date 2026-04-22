@@ -90,9 +90,26 @@ class EpisodeController:
         return cls(KeyboardBackend())
 
     @classmethod
+    def from_null(cls):
+        """No-op controller for automated runs — no pynput, always returns None events."""
+        return cls(NullBackend())
+
+    @classmethod
     def from_gamepad(cls):
         """Create a controller driven by a PS4 gamepad (real-world Pi5)."""
         return cls(GamepadBackend())
+
+
+# ---------------------------------------------------------------------------
+# Null backend — no-op, for automated headless runs
+# ---------------------------------------------------------------------------
+
+class NullBackend:
+    def _attach(self, ctrl):
+        pass
+
+    def close(self):
+        pass
 
 
 # ---------------------------------------------------------------------------
