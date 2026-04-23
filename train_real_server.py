@@ -30,10 +30,14 @@ from dreamer.utils import setup_device
 _parser = argparse.ArgumentParser(add_help=False)
 _parser.add_argument('--skip-init', action='store_true',
                      help='Skip Pi cleanup and init model push (use when resuming).')
+_parser.add_argument('--throttle', type=float, default=None,
+                     help='Override throttle_base from config.toml.')
 _cli, _ = _parser.parse_known_args()
 
 args = load_config('real')
 args.skip_init = _cli.skip_init
+if _cli.throttle is not None:
+    args.throttle_base = _cli.throttle
 
 a = vars(args)
 print(
@@ -154,6 +158,8 @@ else:
     init_cmd = [sys.executable, 'scripts/push_init_model.py']
     if args.models:
         init_cmd += ['--models', args.models]
+    if _cli.throttle is not None:
+        init_cmd += ['--throttle-base', str(args.throttle_base)]
     r = subprocess.run(init_cmd)
     if r.returncode != 0:
         print('[Server] Pi init failed — check SSH alias and Pi connectivity.')
