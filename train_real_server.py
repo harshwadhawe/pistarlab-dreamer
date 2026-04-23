@@ -30,12 +30,15 @@ from dreamer.utils import setup_device
 _parser = argparse.ArgumentParser(add_help=False)
 _parser.add_argument('--skip-init', action='store_true',
                      help='Skip Pi cleanup and init model push (use when resuming).')
-_parser.add_argument('--throttle', type=float, default=None,
+_parser.add_argument('--throttle',     type=float, default=None,
                      help='Override throttle_base from config.toml.')
+_parser.add_argument('--no-progress',  action='store_true',
+                     help='Suppress rsync transfer progress.')
 _cli, _ = _parser.parse_known_args()
 
 args = load_config('real')
-args.skip_init = _cli.skip_init
+args.skip_init  = _cli.skip_init
+args.progress   = not _cli.no_progress
 if _cli.throttle is not None:
     args.throttle_base = _cli.throttle
 
@@ -95,7 +98,7 @@ if args.models and os.path.exists(args.models):
 # Comms
 # ---------------------------------------------------------------------------
 receiver  = RsyncExperienceReceiver(pi_alias=args.pi_alias, local_inbox=incoming_dir)
-publisher = RsyncModelPublisher(pi_alias=args.pi_alias)
+publisher = RsyncModelPublisher(pi_alias=args.pi_alias, progress=args.progress)
 
 # ---------------------------------------------------------------------------
 # TFLite export
@@ -160,6 +163,8 @@ else:
         init_cmd += ['--models', args.models]
     if _cli.throttle is not None:
         init_cmd += ['--throttle-base', str(args.throttle_base)]
+    if _cli.no_progress:
+        init_cmd.append('--no-progress')
     r = subprocess.run(init_cmd)
     if r.returncode != 0:
         print('[Server] Pi init failed — check SSH alias and Pi connectivity.')

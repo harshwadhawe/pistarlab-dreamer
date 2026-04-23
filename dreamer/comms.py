@@ -174,19 +174,21 @@ class RsyncModelPublisher:
     """Server — pushes TFLite to Pi via rsync. tflite synced before step.txt
     so Pi never loads a partially-transferred model."""
 
-    def __init__(self, pi_alias: str):
+    def __init__(self, pi_alias: str, progress: bool = True):
         self.pi_alias = pi_alias
+        self.progress = progress
         print(f'[Comms] RsyncModelPublisher → {pi_alias}:{PI_INBOX}/')
 
     def publish(self, tflite_path: str, step: int):
         # Push model first — Pi won't load it until step.txt advances
-        r1 = subprocess.run([
-            'rsync', '-az', '--timeout=60',
-            tflite_path,
-            f'{self.pi_alias}:{PI_INBOX}/latest.tflite',
-        ], capture_output=True, text=True)
+        kb = os.path.getsize(tflite_path) // 1024
+        print(f'[Server → Pi] Pushing model ({kb} KB) — step {step}...')
+        cmd = ['rsync', '-az', '--timeout=60']
+        if self.progress:
+            cmd.append('--progress')
+        r1 = subprocess.run(cmd + [tflite_path, f'{self.pi_alias}:{PI_INBOX}/latest.tflite'])
         if r1.returncode != 0:
-            print(f'[Comms] rsync model FAILED:\n{r1.stderr}')
+            print(f'[Comms] rsync model FAILED (code {r1.returncode})')
             return
 
         step_tmp = '/tmp/dreamer_push_step.txt'
@@ -196,9 +198,8 @@ class RsyncModelPublisher:
             'rsync', '-az', '--timeout=10',
             step_tmp,
             f'{self.pi_alias}:{PI_INBOX}/step.txt',
-        ], capture_output=True, text=True)
+        ], capture_output=True)
         if r2.returncode != 0:
-            print(f'[Comms] rsync step.txt FAILED:\n{r2.stderr}')
+            print(f'[Comms] rsync step.txt FAILED (code {r2.returncode})')
         else:
-            kb = os.path.getsize(tflite_path) // 1024
-            print(f'[Server → Pi] Model pushed via rsync — step {step}  {kb} KB')
+            print(f'[Server → Pi] Model live on Pi.')

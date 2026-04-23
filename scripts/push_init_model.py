@@ -37,8 +37,10 @@ cfg = load_config('real')
 parser = argparse.ArgumentParser()
 parser.add_argument('--models',     type=str,   default=cfg.models,
                     help='Checkpoint .pth to use. Empty → random init weights.')
-parser.add_argument('--skip-clean', action='store_true',
+parser.add_argument('--skip-clean',  action='store_true',
                     help='Skip deleting old files on Pi (use when re-pushing after crash).')
+parser.add_argument('--no-progress', action='store_true',
+                    help='Suppress rsync transfer progress.')
 parser.add_argument('--belief-size',    type=int,   default=cfg.belief_size)
 parser.add_argument('--state-size',     type=int,   default=cfg.state_size)
 parser.add_argument('--action-size',    type=int,   default=cfg.action_size)
@@ -164,13 +166,12 @@ def main():
         print(f'\n[Init] Pushing models to {PI_ALIAS}:{PI_WORKDIR}/models/ ...')
         rgb_src  = os.path.join(staging, 'inference_rgb.tflite')
         gray_src = os.path.join(staging, 'inference_grayscale.tflite')
-        r = subprocess.run([
-            'rsync', '-az', '--timeout=60',
-            rgb_src, gray_src,
-            f'{PI_ALIAS}:{PI_WORKDIR}/models/',
-        ], capture_output=True, text=True)
+        rsync_cmd = ['rsync', '-az', '--timeout=60']
+        if not args.no_progress:
+            rsync_cmd.append('--progress')
+        r = subprocess.run(rsync_cmd + [rgb_src, gray_src, f'{PI_ALIAS}:{PI_WORKDIR}/models/'])
         if r.returncode != 0:
-            print(f'[Init] rsync FAILED:\n{r.stderr}')
+            print(f'[Init] rsync FAILED (code {r.returncode})')
             sys.exit(1)
 
     print(f'\n[Init] Done. Pi has inference_rgb.tflite + inference_grayscale.tflite.')
