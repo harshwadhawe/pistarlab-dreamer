@@ -145,36 +145,35 @@ def main():
     if not args.skip_clean:
         clean_pi()
 
+    channels = 1 if cfg.grayscale else 3
+    label    = 'grayscale' if cfg.grayscale else 'rgb'
+
     with tempfile.TemporaryDirectory() as staging:
-        for channels, label in [(3, 'rgb'), (1, 'grayscale')]:
-            tflite_path = os.path.join(staging, f'inference_{label}.tflite')
+        tflite_path = os.path.join(staging, f'inference_{label}.tflite')
 
-            if args.models and os.path.exists(args.models):
-                ckpt_path = args.models
-                print(f'\n[Init] Using checkpoint: {ckpt_path}  (channels={channels})')
-            else:
-                ckpt_path = os.path.join(staging, f'init_{channels}ch.pth')
-                print(f'\n[Init] Generating random init weights (channels={channels})...')
-                _make_random_ckpt(channels, ckpt_path)
+        if args.models and os.path.exists(args.models):
+            ckpt_path = args.models
+            print(f'\n[Init] Using checkpoint: {ckpt_path}  (channels={channels})')
+        else:
+            ckpt_path = os.path.join(staging, 'init.pth')
+            print(f'\n[Init] Generating random init weights (channels={channels})...')
+            _make_random_ckpt(channels, ckpt_path)
 
-            print(f'[Init] Exporting inference_{label}.tflite...')
-            _export_tflite(ckpt_path, channels, tflite_path)
-            kb = os.path.getsize(tflite_path) // 1024
-            print(f'[Init] Exported {kb} KB → {tflite_path}')
+        print(f'[Init] Exporting inference_{label}.tflite...')
+        _export_tflite(ckpt_path, channels, tflite_path)
+        kb = os.path.getsize(tflite_path) // 1024
+        print(f'[Init] Exported {kb} KB → {tflite_path}')
 
-        # Rsync both tflite files to Pi in one call
-        print(f'\n[Init] Pushing models to {PI_ALIAS}:{PI_WORKDIR}/models/ ...')
-        rgb_src  = os.path.join(staging, 'inference_rgb.tflite')
-        gray_src = os.path.join(staging, 'inference_grayscale.tflite')
+        print(f'\n[Init] Pushing to {PI_ALIAS}:{PI_WORKDIR}/models/ ...')
         rsync_cmd = ['rsync', '-az', '--timeout=60']
         if not args.no_progress:
             rsync_cmd.append('--progress')
-        r = subprocess.run(rsync_cmd + [rgb_src, gray_src, f'{PI_ALIAS}:{PI_WORKDIR}/models/'])
+        r = subprocess.run(rsync_cmd + [tflite_path, f'{PI_ALIAS}:{PI_WORKDIR}/models/'])
         if r.returncode != 0:
             print(f'[Init] rsync FAILED (code {r.returncode})')
             sys.exit(1)
 
-    print(f'\n[Init] Done. Pi has inference_rgb.tflite + inference_grayscale.tflite.')
+    print(f'\n[Init] Done. Pi has inference_{label}.tflite.')
     print(f'[Init] Start train_real_pi.py on the Pi now.')
 
 

@@ -15,7 +15,9 @@ SSH alias for Pi is configured in config.toml [real] pi_alias.
 """
 
 import os
+import shutil
 import subprocess
+import tempfile
 import time
 
 import numpy as np
@@ -189,26 +191,22 @@ class RsyncModelPublisher:
         print(f'[Comms] RsyncModelPublisher → {pi_alias}:{PI_INBOX}/')
 
     def publish(self, tflite_path: str, step: int):
-        # Push model first — Pi won't load it until step.txt advances
         kb = os.path.getsize(tflite_path) // 1024
         print(f'[Server → Pi] Pushing model ({kb} KB) — step {step}...')
-        cmd = ['rsync', '-az', '--timeout=60']
-        if self.progress:
-            cmd.append('--progress')
-        r1 = subprocess.run(cmd + [tflite_path, f'{self.pi_alias}:{PI_INBOX}/latest.tflite'])
-        if r1.returncode != 0:
-            print(f'[Comms] rsync model FAILED (code {r1.returncode})')
-            return
 
-        step_tmp = '/tmp/dreamer_push_step.txt'
-        with open(step_tmp, 'w') as f:
-            f.write(str(step))
-        r2 = subprocess.run([
-            'rsync', '-az', '--timeout=10',
-            step_tmp,
-            f'{self.pi_alias}:{PI_INBOX}/step.txt',
-        ], capture_output=True)
-        if r2.returncode != 0:
-            print(f'[Comms] rsync step.txt FAILED (code {r2.returncode})')
+        # Stage tflite + step.txt together so one SSH handshake transfers both.
+        # latest.tflite sorts before step.txt alphabetically, so rsync transfers
+        # the model first — Pi only triggers on step.txt changing.
+        with tempfile.TemporaryDirectory() as staging:
+            shutil.copy2(tflite_path, os.path.join(staging, 'latest.tflite'))
+            with open(os.path.join(staging, 'step.txt'), 'w') as f:
+                f.write(str(step))
+            cmd = ['rsync', '-az', '--timeout=60']
+            if self.progress:
+                cmd.append('--progress')
+            r = subprocess.run(cmd + [f'{staging}/', f'{self.pi_alias}:{PI_INBOX}/'])
+
+        if r.returncode != 0:
+            print(f'[Comms] rsync model FAILED (code {r.returncode})')
         else:
-            print(f'[Server → Pi] Model live on Pi.')
+            print(f'[Server → Pi] Model live on Pi — step {step}.')
