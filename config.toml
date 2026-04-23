@@ -8,7 +8,7 @@
 [common]
 
 # ── Experiment identity ── (change these most often) ──────────────────────────
-experiment_name       = "REAL_RGB_NOHFLIP_NOAUG"          # tag appended to rewards CSV; empty = timestamp
+experiment_name       = "REAL_RGB_NOHFLIP_NOAUG_VAR_THROTTLE"          # tag appended to rewards CSV; empty = timestamp
 seed                  = 42
 
 # ── Observation ───────────────────────────────────────────────────────────────
