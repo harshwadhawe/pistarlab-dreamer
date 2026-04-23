@@ -8,7 +8,7 @@
 [common]
 
 # ── Experiment identity ── (change these most often) ──────────────────────────
-experiment_name       = "REAL_RGB_NOHFLIP_NOAUG_VAR_THROTTLE"          # tag appended to rewards CSV; empty = timestamp
+experiment_name       = "REAL_RGB_NOHFLIP_NOAUG_VAR_THROTTLE_TRACK_2"          # tag appended to rewards CSV; empty = timestamp
 seed                  = 42
 
 # ── Observation ───────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ aug_crop_frac         = 0.9         # crop to this fraction then resize back
 fix_speed             = false        # true → steering only; false → variable throttle
 throttle_base         = 0.28        # fixed throttle when fix_speed=true
 throttle_min          = 0.25
-throttle_max          = 0.30
+throttle_max          = 0.35
 angle_min             = -1.0
 angle_max             = 1.0
 
