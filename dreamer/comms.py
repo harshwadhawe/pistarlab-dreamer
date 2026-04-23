@@ -71,7 +71,7 @@ class RsyncExperienceSender:
     def send(self, obs: np.ndarray, actions: np.ndarray,
              rewards: np.ndarray, dones: np.ndarray, meta: dict):
         ep       = meta.get('episode_num', 0)
-        tmp_path = os.path.join(PI_OUTBOX, f'ep_{ep:04d}.npz.tmp')
+        tmp_path = os.path.join(PI_OUTBOX, f'.ep_{ep:04d}_tmp.npz')
         npz_path = os.path.join(PI_OUTBOX, f'ep_{ep:04d}.npz')
         sentinel = os.path.join(PI_OUTBOX, f'ep_{ep:04d}.ready')
         np.savez_compressed(tmp_path,
