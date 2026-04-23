@@ -19,7 +19,7 @@ warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 from dreamer.config import load_config
 from dreamer.utils.obs import preprocess_frame
-from dreamer.comms import make_comms, MODEL_HTTP_PORT as MODEL_PORT
+from dreamer.comms import make_comms
 from donkeycar.parts.actuator import PCA9685
 from donkeycar.parts.camera import PiCamera
 
@@ -270,7 +270,7 @@ class PhysicalDreamerCar:
                         print(f'[Car] Still waiting for server... {elapsed:.0f}s elapsed', end='\r')
                     if elapsed > 600:
                         print(f'\n[Car] WARNING: no model from server after {elapsed:.0f}s — '
-                              f'check server is running and port {MODEL_PORT} is reachable.')
+                              f'check server is running and rsync from {self.args.server_ip} is reachable.')
                         wait_start = time.time()
                     if self.ps4.should_quit:
                         break

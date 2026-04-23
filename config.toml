@@ -147,7 +147,8 @@ results_dir           = "results/real"
 expl_amount           = 0.0         # TFLite inference is deterministic
 
 # ── Car communication ─────────────────────────────────────────────────────────
-bind_ip               = "*"         # bind to all interfaces
+pi_alias              = "car"       # SSH alias for Pi (Mac ~/.ssh/config Host entry)
+pi_workdir            = "~/pistarlab-dreamer"  # Pi working directory (rsync base path)
 
 # ── Model/checkpoint cadence ──────────────────────────────────────────────────
 push_interval         = 1           # export + push TFLite every N episodes

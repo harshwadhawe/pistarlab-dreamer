@@ -1,83 +1,121 @@
 """
-Export both RGB and grayscale TFLite models and serve them to the Pi via HTTP.
+Export init TFLite models and push to Pi via rsync.
 
-Architecture values are read from config.toml [common]. No flags needed
-unless you want to override a specific value.
+Does three things automatically:
+  1. Cleans old .tflite + .pth from Pi models/ and resets rsync dirs
+  2. Exports inference_rgb.tflite + inference_grayscale.tflite
+  3. Rsyncs both to Pi — no pull_init_model.py needed on Pi
 
-Run on the SERVER once. The Pi runs pull_init_model.py simultaneously.
-After this, the Pi has models/inference_rgb.tflite and models/inference_grayscale.tflite
-and never needs to run init scripts again — train_real_pi.py auto-selects.
+Architecture values come from config.toml [common] / [real].
 
 Usage:
-  # Random init (first run, no checkpoint):
+  # Random init (first ever run):
   python scripts/push_init_model.py
 
-  # Bootstrap from a sim/real checkpoint:
+  # Bootstrap from a sim or real checkpoint:
   python scripts/push_init_model.py --models results/real/.../models_50.pth
+
+  # Re-push without cleaning Pi (e.g. after a server crash):
+  python scripts/push_init_model.py --skip-clean
 """
 
 import argparse
-import http.server
 import os
-import socketserver
 import subprocess
 import sys
 import tempfile
-import threading
 
 import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from dreamer.config import load_config
-from dreamer.comms import MODEL_HTTP_PORT
 from dreamer.models.world_model import TransitionModel, VisualObservationModel, RewardModel, VisualEncoder
 from dreamer.models.policy import ActorModel, ValueModel
 
 cfg = load_config('real')
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--models',        type=str,   default='',
-                    help='Path to .pth checkpoint. If empty, random init weights are used.')
-parser.add_argument('--bind_ip',       type=str,   default='')
-# Architecture overrides — defaults come from config.toml [common]
-parser.add_argument('--belief-size',   type=int,   default=cfg.belief_size)
-parser.add_argument('--state-size',    type=int,   default=cfg.state_size)
-parser.add_argument('--action-size',   type=int,   default=cfg.action_size)
-parser.add_argument('--embedding-size',type=int,   default=cfg.embedding_size)
-parser.add_argument('--hidden-size',   type=int,   default=cfg.hidden_size)
-parser.add_argument('--throttle-base', type=float, default=cfg.throttle_base)
-parser.add_argument('--throttle-min',  type=float, default=cfg.throttle_min)
-parser.add_argument('--throttle-max',  type=float, default=cfg.throttle_max)
-parser.add_argument('--fix-speed',     action='store_true', default=cfg.fix_speed)
+parser.add_argument('--models',     type=str,   default=cfg.models,
+                    help='Checkpoint .pth to use. Empty → random init weights.')
+parser.add_argument('--skip-clean', action='store_true',
+                    help='Skip deleting old files on Pi (use when re-pushing after crash).')
+parser.add_argument('--belief-size',    type=int,   default=cfg.belief_size)
+parser.add_argument('--state-size',     type=int,   default=cfg.state_size)
+parser.add_argument('--action-size',    type=int,   default=cfg.action_size)
+parser.add_argument('--embedding-size', type=int,   default=cfg.embedding_size)
+parser.add_argument('--hidden-size',    type=int,   default=cfg.hidden_size)
+parser.add_argument('--throttle-base',  type=float, default=cfg.throttle_base)
+parser.add_argument('--throttle-min',   type=float, default=cfg.throttle_min)
+parser.add_argument('--throttle-max',   type=float, default=cfg.throttle_max)
+parser.add_argument('--fix-speed',      action='store_true', default=cfg.fix_speed)
 args = parser.parse_args()
 
+PI_ALIAS   = cfg.pi_alias
+PI_WORKDIR = cfg.pi_workdir
+
 print(
-    f'[Init] Config — belief={args.belief_size} state={args.state_size} '
+    f'[Init] belief={args.belief_size} state={args.state_size} '
     f'embed={args.embedding_size} hidden={args.hidden_size} '
-    f'throttle={args.throttle_base}'
+    f'throttle={args.throttle_base}  Pi={PI_ALIAS}:{PI_WORKDIR}'
 )
 
 
-def _make_ckpt(channels):
-    path = tempfile.mktemp(suffix=f'_init_{channels}ch.pth')
+# ---------------------------------------------------------------------------
+# Step 1 — clean Pi
+# ---------------------------------------------------------------------------
+
+def clean_pi():
+    print(f'\n[Init] Cleaning Pi ({PI_ALIAS})...')
+    cmd = (
+        f'rm -f {PI_WORKDIR}/models/*.tflite {PI_WORKDIR}/models/*.pth && '
+        f'mkdir -p {PI_WORKDIR}/models && '
+        f'rm -rf /tmp/dreamer && '
+        f'mkdir -p /tmp/dreamer/outbox /tmp/dreamer/inbox'
+    )
+    r = subprocess.run(['ssh', PI_ALIAS, cmd], capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f'[Init] WARNING: Pi cleanup had issues:\n{r.stderr}')
+    else:
+        print('[Init] Pi cleaned: models/*.tflite, models/*.pth, /tmp/dreamer/* removed.')
+
+
+# ---------------------------------------------------------------------------
+# Step 2 — build checkpoint (random init or from .pth)
+# ---------------------------------------------------------------------------
+
+def _make_random_ckpt(channels: int, path: str):
     torch.save({
-        'transition_model':  TransitionModel(args.belief_size, args.state_size, args.action_size, args.hidden_size, args.embedding_size).state_dict(),
-        'observation_model': VisualObservationModel(args.belief_size, args.state_size, args.embedding_size, channels=channels).state_dict(),
-        'reward_model':      RewardModel(args.belief_size, args.state_size, args.hidden_size).state_dict(),
+        'transition_model':  TransitionModel(
+            args.belief_size, args.state_size, args.action_size,
+            args.hidden_size, args.embedding_size,
+        ).state_dict(),
+        'observation_model': VisualObservationModel(
+            args.belief_size, args.state_size, args.embedding_size,
+            channels=channels,
+        ).state_dict(),
+        'reward_model':      RewardModel(
+            args.belief_size, args.state_size, args.hidden_size,
+        ).state_dict(),
         'encoder':           VisualEncoder(args.embedding_size, channels=channels).state_dict(),
-        'actor_model':       ActorModel(args.action_size, args.belief_size, args.state_size, args.hidden_size, fix_speed=args.fix_speed, throttle_base=args.throttle_base, throttle_min=args.throttle_min, throttle_max=args.throttle_max).state_dict(),
+        'actor_model':       ActorModel(
+            args.action_size, args.belief_size, args.state_size, args.hidden_size,
+            fix_speed=args.fix_speed, throttle_base=args.throttle_base,
+            throttle_min=args.throttle_min, throttle_max=args.throttle_max,
+        ).state_dict(),
         'value_model':       ValueModel(args.belief_size, args.state_size, args.hidden_size).state_dict(),
         'value_model2':      ValueModel(args.belief_size, args.state_size, args.hidden_size).state_dict(),
         'world_optimizer': {}, 'actor_optimizer': {}, 'value_optimizer': {},
     }, path)
-    return path
 
 
-def _export_tflite(ckpt_path, channels):
-    out = tempfile.mktemp(suffix=f'_{channels}ch.tflite')
+# ---------------------------------------------------------------------------
+# Step 3 — export TFLite
+# ---------------------------------------------------------------------------
+
+def _export_tflite(ckpt_path: str, channels: int, out_path: str):
     cmd = [
         sys.executable, 'scripts/export_pth_to_tflite.py', ckpt_path,
-        '--output',         out,
+        '--output',         out_path,
         '--channels',       str(channels),
         '--belief-size',    str(args.belief_size),
         '--state-size',     str(args.state_size),
@@ -90,61 +128,54 @@ def _export_tflite(ckpt_path, channels):
     ]
     if args.fix_speed:
         cmd.append('--fix-speed')
-    print(f'[Init] Exporting TFLite (channels={channels})...')
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f'[Init] Export failed:\n{result.stderr}')
+        print(f'[Init] Export failed (channels={channels}):\n{result.stderr}')
         sys.exit(1)
     print(result.stdout.strip())
-    return out
 
 
-# --- Build both tflite files ---
-models = {}
-for ch, label in [(3, 'rgb'), (1, 'grayscale')]:
-    if args.models and os.path.exists(args.models):
-        ckpt = args.models
-        print(f'[Init] Using checkpoint: {ckpt} (channels={ch})')
-    else:
-        print(f'[Init] Generating random init weights (channels={ch})...')
-        ckpt = _make_ckpt(ch)
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
-    tflite = _export_tflite(ckpt, ch)
-    with open(tflite, 'rb') as f:
-        models[label] = f.read()
-    os.remove(tflite)
-    if not args.models:
-        os.remove(ckpt)
+def main():
+    if not args.skip_clean:
+        clean_pi()
 
-# --- Serve via HTTP ---
-_models = models
+    with tempfile.TemporaryDirectory() as staging:
+        for channels, label in [(3, 'rgb'), (1, 'grayscale')]:
+            tflite_path = os.path.join(staging, f'inference_{label}.tflite')
 
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        for label, data in _models.items():
-            if self.path == f'/model/{label}':
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/octet-stream')
-                self.send_header('Content-Length', str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-                print(f'[Init] Served inference_{label}.tflite ({len(data)//1024} KB)')
-                return
-        self.send_response(404)
-        self.end_headers()
+            if args.models and os.path.exists(args.models):
+                ckpt_path = args.models
+                print(f'\n[Init] Using checkpoint: {ckpt_path}  (channels={channels})')
+            else:
+                ckpt_path = os.path.join(staging, f'init_{channels}ch.pth')
+                print(f'\n[Init] Generating random init weights (channels={channels})...')
+                _make_random_ckpt(channels, ckpt_path)
 
-    def log_message(self, *_): pass
+            print(f'[Init] Exporting inference_{label}.tflite...')
+            _export_tflite(ckpt_path, channels, tflite_path)
+            kb = os.path.getsize(tflite_path) // 1024
+            print(f'[Init] Exported {kb} KB → {tflite_path}')
+
+        # Rsync both tflite files to Pi in one call
+        print(f'\n[Init] Pushing models to {PI_ALIAS}:{PI_WORKDIR}/models/ ...')
+        rgb_src  = os.path.join(staging, 'inference_rgb.tflite')
+        gray_src = os.path.join(staging, 'inference_grayscale.tflite')
+        r = subprocess.run([
+            'rsync', '-az', '--timeout=60',
+            rgb_src, gray_src,
+            f'{PI_ALIAS}:{PI_WORKDIR}/models/',
+        ], capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f'[Init] rsync FAILED:\n{r.stderr}')
+            sys.exit(1)
+
+    print(f'\n[Init] Done. Pi has inference_rgb.tflite + inference_grayscale.tflite.')
+    print(f'[Init] Start train_real_pi.py on the Pi now.')
 
 
-class _ReuseServer(socketserver.TCPServer):
-    allow_reuse_address = True
-
-
-host = args.bind_ip if args.bind_ip else ''
-server = _ReuseServer((host, MODEL_HTTP_PORT), Handler)
-print(f'\n[Init] Serving on port {MODEL_HTTP_PORT}. Run pull_init_model.py on the Pi...')
-print(f'       Ctrl+C to stop once Pi has downloaded both models.')
-try:
-    server.serve_forever()
-except KeyboardInterrupt:
-    print('\n[Init] Done.')
+if __name__ == '__main__':
+    main()

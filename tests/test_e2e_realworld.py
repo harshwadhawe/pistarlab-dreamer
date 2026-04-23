@@ -16,7 +16,7 @@ Run:
   python test_e2e_realworld.py
 """
 
-import os, sys, subprocess, tempfile, threading, time, traceback
+import os, sys, subprocess, tempfile, traceback
 import numpy as np
 import torch
 
@@ -48,9 +48,8 @@ section('1. Create dummy checkpoint')
 from dreamer.models.world_model import TransitionModel, VisualEncoder, VisualObservationModel, RewardModel
 from dreamer.models.policy import ActorModel, ValueModel
 
-ckpt_path    = tempfile.mktemp(suffix='.pth')
-tflite_path  = tempfile.mktemp(suffix='.tflite')
-tflite2_path = tempfile.mktemp(suffix='.tflite')
+ckpt_path   = tempfile.mktemp(suffix='.pth')
+tflite_path = tempfile.mktemp(suffix='.tflite')
 
 try:
     encoder    = VisualEncoder(EMBEDDING_SIZE, channels=CHANNELS).eval()
@@ -168,156 +167,84 @@ except Exception:
 
 
 # ---------------------------------------------------------------------------
-# 4. Full ZMQ round-trip: car → server (train + export) → car (reload)
+# 4. File-based comms roundtrip (rsync protocol, local file I/O only)
 # ---------------------------------------------------------------------------
-section('4. ZMQ round-trip: car → server → car')
+section('4. File-based comms roundtrip (rsync protocol)')
 
-from dreamer.comms import ExperienceSender, ExperienceReceiver, ModelPublisher, ModelSubscriber
+import dreamer.comms as _comms_mod
 
-round_trip_result = {}
-
-def mini_server():
-    """Minimal server: receive 1 episode, train if buffer warm, export TFLite, publish."""
-    try:
-        import types
-        from dreamer.agent import Dreamer
-
-        # Build args namespace matching Dreamer's expectations
-        args = types.SimpleNamespace(
-            belief_size=BELIEF_SIZE, state_size=STATE_SIZE,
-            action_size=ACTION_SIZE, hidden_size=HIDDEN_SIZE,
-            embedding_size=EMBEDDING_SIZE,
-            observation_size=(CHANNELS, 64, 64),
-            symbolic=False, bit_depth=8,
-            experience_size=100000, batch_size=10, chunk_size=10,
-            collect_interval=2,
-            world_lr=6e-4, actor_lr=8e-5, value_lr=8e-5,
-            adam_epsilon=1e-7, grad_clip_norm=100.0,
-            learning_rate_schedule=0,
-            planning_horizon=5, discount=0.99, disclam=0.95,
-            polyak=0.005, free_nats=1.0,
-            expl_amount=0.0, with_logprob=False,
-            auto_temp=False, temp=0.003,
-            kl_balance=True, symlog_rewards=True, return_norm=True,
-            reward_scale=10, pcont=False, pcont_scale=10,
-            fix_speed=True, throttle_base=THROTTLE_BASE,
-            throttle_min=0.1, throttle_max=0.5,
-            angle_min=-1.0, angle_max=1.0,
-            dense_act='elu', cnn_act='relu',
-            augment=False, smooth_weight=0.0,
-            device=torch.device('cpu'),
-        )
-
-        agent = Dreamer(args)
-        # Load dummy weights so export has real structure
-        ckpt = torch.load(ckpt_path, map_location='cpu')
-        agent.transition_model.load_state_dict(ckpt['transition_model'])
-        agent.encoder.load_state_dict(ckpt['encoder'])
-        agent.actor_model.load_state_dict(ckpt['actor_model'])
-        agent.observation_model.load_state_dict(ckpt['observation_model'])
-        agent.reward_model.load_state_dict(ckpt['reward_model'])
-        agent.value_model.load_state_dict(ckpt['value_model'])
-        agent.value_model2.load_state_dict(ckpt['value_model2'])
-
-        rx  = ExperienceReceiver(bind_ip='127.0.0.1')
-        pub = ModelPublisher(bind_ip='127.0.0.1')
-
-        round_trip_result['server_ready'] = True
-        ep = rx.recv()
-        T  = len(ep['rewards'])
-
-        agent.append_episode(ep['obs'], ep['actions'], ep['rewards'], ep['dones'])
-
-        round_trip_result['episode_received'] = ep['episode_num']
-
-        # Train (buffer has T steps — use tiny batch/chunk for test)
-        if agent.D.steps >= args.chunk_size:
-            agent.update_parameters(args.collect_interval)
-            round_trip_result['trained'] = True
-
-        # Export TFLite
-        cmd = [
-            sys.executable, 'scripts/export_pth_to_tflite.py', ckpt_path,
-            '--output', tflite2_path,
-            '--channels', str(CHANNELS),
-            '--belief-size', str(BELIEF_SIZE),
-            '--state-size', str(STATE_SIZE),
-            '--action-size', str(ACTION_SIZE),
-            '--embedding-size', str(EMBEDDING_SIZE),
-            '--hidden-size', str(HIDDEN_SIZE),
-            '--throttle-base', str(THROTTLE_BASE),
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-        round_trip_result['export2'] = proc.returncode == 0
-
-        # Publish
-        time.sleep(0.4)  # let subscriber connect
-        pub.publish(tflite2_path, step=agent.D.steps)
-        round_trip_result['published'] = True
-
-    except Exception:
-        traceback.print_exc()
-
-
-server_thread = threading.Thread(target=mini_server, daemon=True)
-server_thread.start()
-
-# Wait for server to bind
-for _ in range(20):
-    if round_trip_result.get('server_ready'):
-        break
-    time.sleep(0.1)
-
-# Car side
+_roundtrip = {}
 try:
-    sender    = ExperienceSender('127.0.0.1')
-    model_sub = ModelSubscriber('127.0.0.1')
-    time.sleep(0.3)
+    with tempfile.TemporaryDirectory() as _tmpdir:
+        _outbox = os.path.join(_tmpdir, 'outbox')
+        _inbox  = os.path.join(_tmpdir, 'inbox')
+        os.makedirs(_outbox); os.makedirs(_inbox)
 
-    T = 20
-    fake_obs = np.random.randn(T, CHANNELS, 64, 64).astype(np.float32) * 0.1
-    sender.send(
-        obs=fake_obs,
-        actions=np.zeros((T, ACTION_SIZE), dtype=np.float32),
-        rewards=np.ones(T, dtype=np.float32),
-        dones=np.array([False] * (T-1) + [True]),
-        meta={'episode_num': 0, 'steps': T},
-    )
-    print(f'Car sent episode (T={T})')
+        _orig_out, _orig_in = _comms_mod.PI_OUTBOX, _comms_mod.PI_INBOX
+        _comms_mod.PI_OUTBOX = _outbox
+        _comms_mod.PI_INBOX  = _inbox
 
-    server_thread.join(timeout=60)
+        try:
+            T        = 20
+            fake_obs = np.clip(
+                np.random.randn(T, CHANNELS, 64, 64).astype(np.float32) * 0.1,
+                -0.5, 0.5,
+            )
 
-    # Poll for model update
-    update = None
-    for _ in range(50):
-        update = model_sub.poll()
-        if update:
-            break
-        time.sleep(0.2)
+            # Pi sender writes episode as uint8-compressed npz + sentinel
+            sender = _comms_mod.RsyncExperienceSender()
+            sender.send(
+                obs=fake_obs,
+                actions=np.zeros((T, ACTION_SIZE), dtype=np.float32),
+                rewards=np.ones(T, dtype=np.float32),
+                dones=np.array([False] * (T - 1) + [True]),
+                meta={'episode_num': 1},
+            )
 
-    if update:
-        # Simulate hot-reload
-        tmp = '/tmp/test_reload.tflite'
-        with open(tmp, 'wb') as f:
-            f.write(update['model_bytes'])
-        interp2 = tflite_mod.Interpreter(model_path=tmp)
-        interp2.allocate_tensors()
-        print(f'Car hot-reloaded model — server step {update["step"]}, '
-              f'size {len(update["model_bytes"])/1024:.0f} KB')
-        round_trip_result['car_reloaded'] = True
+            assert os.path.exists(os.path.join(_outbox, 'ep_0001.npz')),   'npz missing'
+            assert os.path.exists(os.path.join(_outbox, 'ep_0001.ready')), 'sentinel missing'
+
+            data    = np.load(os.path.join(_outbox, 'ep_0001.npz'))
+            obs_rt  = _comms_mod._uint8_to_obs(data['obs'])
+            max_err = float(np.abs(obs_rt - fake_obs).max())
+            assert obs_rt.shape == fake_obs.shape
+            assert max_err < 0.003, f'uint8 roundtrip error: {max_err:.4f}'
+            _roundtrip['episode_saved'] = True
+            print(f'Episode saved: npz+sentinel present, obs roundtrip err {max_err:.4f}')
+
+            # Discard sentinel
+            sender.send_discard(2)
+            assert os.path.exists(os.path.join(_outbox, 'ep_0002.discard')), 'discard missing'
+            _roundtrip['discard_sent'] = True
+            print('Discard sentinel written correctly')
+
+            # Simulate server pushing model into Pi inbox
+            with open(os.path.join(_inbox, 'latest.tflite'), 'wb') as f:
+                f.write(b'MOCK_TFLITE_BYTES')
+            with open(os.path.join(_inbox, 'step.txt'), 'w') as f:
+                f.write('42')
+
+            watcher = _comms_mod.RsyncModelWatcher()
+            update  = watcher.poll()
+            assert update is not None,                             'watcher returned None'
+            assert update['step'] == 42,                           f'wrong step: {update["step"]}'
+            assert update['model_bytes'] == b'MOCK_TFLITE_BYTES', 'wrong bytes'
+            _roundtrip['model_received'] = True
+            print(f'Model received: step={update["step"]}, size={len(update["model_bytes"])} B')
+
+        finally:
+            _comms_mod.PI_OUTBOX = _orig_out
+            _comms_mod.PI_INBOX  = _orig_in
 
 except Exception:
     traceback.print_exc()
 
 results['round_trip'] = all([
-    round_trip_result.get('episode_received') == 0,
-    round_trip_result.get('trained'),
-    round_trip_result.get('export2'),
-    round_trip_result.get('published'),
-    round_trip_result.get('car_reloaded'),
+    _roundtrip.get('episode_saved'),
+    _roundtrip.get('discard_sent'),
+    _roundtrip.get('model_received'),
 ])
-
-print(f'\nRound-trip details: {round_trip_result}')
+print(f'\nRound-trip details: {_roundtrip}')
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +255,7 @@ checks = [
     ('Checkpoint creation', results.get('checkpoint')),
     ('TFLite export',       results.get('export')),
     ('TFLite inference',    results.get('inference')),
-    ('ZMQ round-trip',      results.get('round_trip')),
+    ('File comms roundtrip', results.get('round_trip')),
 ]
 for name, ok in checks:
     status = PASS if ok else FAIL
@@ -338,7 +265,7 @@ all_pass = all(ok for _, ok in checks)
 print(f'\n{"ALL PASS" if all_pass else "SOME FAILED"}\n')
 
 # Cleanup
-for p in [ckpt_path, tflite_path, tflite2_path]:
+for p in [ckpt_path, tflite_path]:
     try: os.unlink(p)
     except: pass
 

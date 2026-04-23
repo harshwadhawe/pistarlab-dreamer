@@ -1,15 +1,17 @@
 """
 Server-side Dreamer trainer for real-world DonkeyCar.
 
-Receives experience from the Pi5 via ZMQ, trains the world model +
-actor + critic, exports a fused TFLite model, and pushes it back to the car.
+At startup, automatically cleans the Pi and pushes fresh init TFLite models
+via rsync, then waits for episodes and trains.
 
 All settings are in config.toml [real] section.
 
 Usage:
-  python train_real_server.py
+  python train_real_server.py               # full run: init Pi then train
+  python train_real_server.py --skip-init   # resume: skip Pi init, go straight to training
 """
 
+import argparse
 import csv
 import os
 import shutil
@@ -22,10 +24,16 @@ import torch
 
 from dreamer.config import load_config
 from dreamer.agent import Dreamer
-from dreamer.comms import ExperienceReceiver, ModelPublisher, MODEL_HTTP_PORT
+from dreamer.comms import RsyncExperienceReceiver, RsyncModelPublisher
 from dreamer.utils import setup_device
 
+_parser = argparse.ArgumentParser(add_help=False)
+_parser.add_argument('--skip-init', action='store_true',
+                     help='Skip Pi cleanup and init model push (use when resuming).')
+_cli, _ = _parser.parse_known_args()
+
 args = load_config('real')
+args.skip_init = _cli.skip_init
 
 a = vars(args)
 print(
@@ -47,6 +55,9 @@ models_dir = os.path.join(run_dir, 'models')
 os.makedirs(run_dir,    exist_ok=True)
 os.makedirs(images_dir, exist_ok=True)
 os.makedirs(models_dir, exist_ok=True)
+
+incoming_dir = os.path.join(run_dir, 'incoming')
+os.makedirs(incoming_dir, exist_ok=True)
 
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
@@ -79,8 +90,8 @@ if args.models and os.path.exists(args.models):
 # ---------------------------------------------------------------------------
 # Comms
 # ---------------------------------------------------------------------------
-receiver  = ExperienceReceiver(bind_ip=args.bind_ip)
-publisher = ModelPublisher(bind_ip=args.bind_ip)
+receiver  = RsyncExperienceReceiver(pi_alias=args.pi_alias, local_inbox=incoming_dir)
+publisher = RsyncModelPublisher(pi_alias=args.pi_alias)
 
 # ---------------------------------------------------------------------------
 # TFLite export
@@ -131,6 +142,24 @@ def save_checkpoint(episode_count: int) -> None:
     torch.save(agent.D, os.path.join(run_dir, 'experience.pth'))
     agent.save_reconstruction(images_dir, episode_count, args.episodes)
     print(f'[Server] Checkpoint saved → {path}')
+
+
+# ---------------------------------------------------------------------------
+# Pi init — clean + push init models
+# ---------------------------------------------------------------------------
+if args.skip_init:
+    print('[Server] --skip-init: skipping Pi cleanup and init model push.')
+else:
+    print('[Server] Running Pi init (clean + push init models)...')
+    init_cmd = [sys.executable, 'scripts/push_init_model.py']
+    if args.models:
+        init_cmd += ['--models', args.models]
+    r = subprocess.run(init_cmd)
+    if r.returncode != 0:
+        print('[Server] Pi init failed — check SSH alias and Pi connectivity.')
+        sys.exit(1)
+    print('\n[Server] Pi init complete. Start train_real_pi.py on the Pi now.')
+    input('[Server] Press Enter when Pi is running and ready...\n')
 
 
 # ---------------------------------------------------------------------------
