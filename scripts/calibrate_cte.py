@@ -1,10 +1,11 @@
 """
-CTE calibration — drive manually for 10s and observe CTE.
+CTE calibration — drive manually and observe CTE range.
 
 Controls (hold keys):
   ↑ Up    — throttle forward
   ← Left  — steer left
   → Right — steer right
+  Esc     — finish and print results
 
 Usage:
     python scripts/calibrate_cte.py
@@ -13,24 +14,30 @@ Requires the sim to already be running on port 9091.
 """
 
 import sys
-import time
 import numpy as np
 from pynput import keyboard
 
 sys.path.insert(0, '.')
 from dreamer.config import load_config
 
-DURATION   = 10
 THROTTLE   = 0.3
-STEER_STEP = 1.0   # full lock left/right
+STEER_STEP = 1.0
 
-pressed = set()
+pressed  = set()
+finished = False
+
 
 def on_press(key):
-    pressed.add(key)
+    global finished
+    if key == keyboard.Key.esc:
+        finished = True
+    else:
+        pressed.add(key)
+
 
 def on_release(key):
     pressed.discard(key)
+
 
 def get_action():
     steer    = 0.0
@@ -45,6 +52,7 @@ def get_action():
 
 
 def main():
+    global finished
     args = load_config('sim')
 
     import gymnasium as gym
@@ -55,30 +63,37 @@ def main():
     env = gym.make(args.env, conf=conf)
     env.reset(seed=args.seed)
 
-    print(f'\nControls: ↑=forward  ←=left  →=right')
-    print(f'Monitoring for {DURATION}s — drive to each edge.\n')
+    print('\nControls: ↑=forward  ←=left  →=right  Esc=done\n')
 
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
     listener.daemon = True
     listener.start()
 
     cte_log = []
-    start = time.time()
-    while time.time() - start < DURATION:
-        elapsed = time.time() - start
+    while not finished:
         action = get_action()
-        _, _, _, _, info = env.step(action)
+        _, _, terminated, _, info = env.step(action)
         cte = float(info.get('cte', 0.0))
         cte_log.append(cte)
-        bar = '█' * int(abs(cte) / 1.5)
+        bar  = '█' * int(abs(cte) / 1.5)
         side = 'R' if cte >= 0 else 'L'
-        print(f'\r  {elapsed:4.1f}s  CTE={cte:+7.3f}  {side} {bar:<12}', end='', flush=True)
+        print(f'\r  CTE={cte:+7.3f}  {side} {bar:<14}  [Esc to finish]', end='', flush=True)
+        if terminated:
+            env.reset()
 
     listener.stop()
     env.close()
 
+    if not cte_log:
+        print('\nNo data collected.')
+        return
+
     print(f'\n\n  max CTE (right): {max(cte_log):+.3f}')
     print(f'  min CTE (left):  {min(cte_log):+.3f}')
+    print()
+    print('  Suggested config.toml [sim] values:')
+    print(f'    cte_right = {int(abs(max(cte_log))) + 1}')
+    print(f'    cte_left  = {int(abs(min(cte_log))) + 1}')
 
 
 if __name__ == '__main__':

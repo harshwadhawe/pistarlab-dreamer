@@ -48,7 +48,7 @@ csv_path  = os.path.join(run_dir, 'rewards.csv')
 csv_file  = open(csv_path, 'w', newline='')
 csv_writer = csv.writer(csv_file)
 csv_writer.writerow([
-    'episode', 'steps', 'reward',
+    'episode', 'steps', 'reward', 'episode_time',
     'mean_cte', 'max_cte', 'min_cte', 'std_cte', 'survival_rate', 'mean_throttle',
     'obs_loss', 'kl_loss', 'reward_loss', 'actor_loss', 'value_loss',
 ])
@@ -164,6 +164,7 @@ for episode in tqdm(
             time.sleep(0.05)
 
     # --- Data collection (retries on discard) ---
+    ep_start = time.time()
     with torch.no_grad():
         while True:
             buf_snap = agent.D.snapshot()
@@ -226,6 +227,7 @@ for episode in tqdm(
         episode,
         metrics['steps'][-1],
         round(total_reward, 4),
+        round(time.time() - ep_start, 2),
         # driving quality (mean=abs mean, max/min=signed for left/right visibility)
         round(float(np.abs(cte_arr).mean()), 4),
         round(float(cte_arr.max()), 4),
