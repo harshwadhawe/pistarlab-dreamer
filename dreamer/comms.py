@@ -81,8 +81,10 @@ class RsyncExperienceSender:
                             dones=dones)
         os.replace(tmp_path, npz_path)   # atomic — server never reads partial file
         open(sentinel, 'w').close()
-        kb = os.path.getsize(npz_path) // 1024
-        print(f'[Pi] Episode {ep} saved ({kb} KB) → {npz_path}')
+        kb    = os.path.getsize(npz_path) // 1024
+        steps = len(rewards)
+        print(f'[Pi → Server] ep={ep:04d}  steps={steps}  obs={obs.shape}  '
+              f'file={os.path.basename(npz_path)}  ({kb} KB)')
 
     def send_discard(self, episode_num: int):
         os.makedirs(PI_OUTBOX, exist_ok=True)
@@ -113,6 +115,9 @@ class RsyncModelWatcher:
         self._last_step = step
         with open(tflite_path, 'rb') as f:
             model_bytes = f.read()
+        kb = len(model_bytes) // 1024
+        print(f'[Pi ← Server] New model received — step={step}  '
+              f'file={os.path.basename(tflite_path)}  ({kb} KB)')
         return {'model_bytes': model_bytes, 'step': step}
 
 
@@ -157,7 +162,11 @@ class RsyncExperienceReceiver:
                 self._seen.add(fname)
                 self._seen.add(npz_name)
                 ep_num = int(fname.split('_')[1].split('.')[0])
-                data = np.load(npz_path)
+                data   = np.load(npz_path)
+                kb     = os.path.getsize(npz_path) // 1024
+                steps  = len(data['rewards'])
+                print(f'[Server ← Pi] ep={ep_num:04d}  steps={steps}  '
+                      f'obs={data["obs"].shape}  file={npz_name}  ({kb} KB)')
                 return {
                     'obs':         _uint8_to_obs(data['obs']),
                     'actions':     data['actions'],

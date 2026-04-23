@@ -16,7 +16,7 @@ grayscale             = false       # true → 1-channel, false → 3-channel RG
 
 # ── Augmentation ──────────────────────────────────────────────────────────────
 augment               = false       # DrQ pixel augmentation
-hflip                 = false       # append horizontally-flipped copy of each episode
+hflip                 = true       # append horizontally-flipped copy of each episode
 
 # Augmentation parameters (only used when augment=true)
 aug_brightness        = 0.3         # ±brightness shift  (tuned from IL)
