@@ -161,6 +161,6 @@ smooth_weight         = 0.1         # override: real car needs more smoothing th
 # Edit server_ip before each session.
 # ─────────────────────────────────────────────────────────────────────────────
 
-server_ip             = "192.168.0.104"   # Mac IP — run `ipconfig getifaddr en0`
+server_ip             = "192.168.0.103"   # Mac IP — run `ipconfig getifaddr en0`
 model                 = ""                # leave empty to auto-select from models/
 max_episode_steps     = 2000              # auto-end episode after N steps (~33s at 60fps)
