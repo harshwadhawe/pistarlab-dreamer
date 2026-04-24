@@ -48,6 +48,10 @@ np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
 script_start = time.time()
+_collection_time_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'collection_time.txt')
+if os.path.exists(_collection_time_path):
+    with open(_collection_time_path) as _f:
+        script_start -= float(_f.read().strip())
 timestamp  = datetime.now().strftime('%Y%m%d_%H%M%S')
 run_dir    = os.path.join(args.results_dir, f'SAC_{timestamp}')
 images_dir = os.path.join(run_dir, 'images')

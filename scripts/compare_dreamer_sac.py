@@ -45,16 +45,34 @@ def plot_metric(ax, dreamer, sac, xcol, ycol, xlabel, ylabel, title):
     ax.legend()
 
 
+def latest_csv(results_dir, env='donkey-generated-track-v0', seed='42'):
+    dreamer_root = os.path.join(results_dir, env, seed)
+    runs = sorted(os.listdir(dreamer_root))
+    dreamer_csv = os.path.join(dreamer_root, runs[-1], 'rewards.csv')
+    sac_root = os.path.join(results_dir, 'sac')
+    sac_runs = sorted(os.listdir(sac_root))
+    sac_csv = os.path.join(sac_root, sac_runs[-1], 'rewards.csv')
+    return dreamer_csv, sac_csv
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dreamer',   required=True)
-    parser.add_argument('--sac',       required=True)
+    parser.add_argument('--dreamer',   default=None)
+    parser.add_argument('--sac',       default=None)
+    parser.add_argument('--latest',    action='store_true', help='Auto-pick latest runs')
     parser.add_argument('--out',       default='plots/comparison.png')
     parser.add_argument('--threshold', type=float, default=500.0)
     args = parser.parse_args()
 
-    dreamer = load(args.dreamer, 'Dreamer')
-    sac     = load(args.sac,     'SAC')
+    if args.latest or (args.dreamer is None and args.sac is None):
+        dreamer_path, sac_path = latest_csv('results')
+        print(f'Dreamer: {dreamer_path}')
+        print(f'SAC:     {sac_path}')
+    else:
+        dreamer_path, sac_path = args.dreamer, args.sac
+
+    dreamer = load(dreamer_path, 'Dreamer')
+    sac     = load(sac_path,     'SAC')
 
     for df in (dreamer, sac):
         if 'wall_time' in df.columns:

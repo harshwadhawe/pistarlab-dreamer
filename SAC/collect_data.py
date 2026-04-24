@@ -9,6 +9,7 @@ Usage:
 import argparse
 import os
 import sys
+import time
 
 import numpy as np
 
@@ -19,6 +20,7 @@ from dreamer.envs import Env
 
 
 def main():
+    collect_start = time.time()
     parser = argparse.ArgumentParser()
     parser.add_argument('--episodes', type=int, default=10,
                         help='Number of random episodes to collect')
@@ -64,6 +66,12 @@ def main():
     np.savez_compressed(cli.out, frames=uint8)
     kb = os.path.getsize(cli.out) // 1024
     print(f'[Collect] Saved {len(all_frames)} frames {arr.shape} → {cli.out}  ({kb} KB)')
+
+    elapsed = round(time.time() - collect_start, 1)
+    time_path = os.path.join(os.path.dirname(os.path.abspath(cli.out)), 'collection_time.txt')
+    with open(time_path, 'w') as f:
+        f.write(str(elapsed))
+    print(f'[Collect] Collection time: {elapsed}s → {time_path}')
 
 
 if __name__ == '__main__':
