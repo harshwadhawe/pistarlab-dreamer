@@ -21,9 +21,19 @@ results/*
 models/*
 !models/.gitkeep
 checkpoints/
+
+# Model weights + exports
 *.pth
 *.pt
 *.tflite
+
+# SAC seed data
+SAC/data/*
+!SAC/data/.gitkeep
+
+# Plots (generated, not committed)
+plots/*
+!plots/.gitkeep
 
 # Logs
 *.log

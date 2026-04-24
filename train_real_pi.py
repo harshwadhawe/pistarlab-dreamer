@@ -2,7 +2,7 @@
 Pi5 inference + experience collection loop for real-world DonkeyCar.
 
 All settings are in config.toml [pi] section.
-Edit server_ip in config.toml before each session.
+Edit pi_alias / pi_workdir in config.toml [real] if your SSH setup changes.
 
 Usage:
   python train_real_pi.py
@@ -19,7 +19,7 @@ warnings.filterwarnings('ignore', category=DeprecationWarning)
 
 from dreamer.config import load_config
 from dreamer.utils.obs import preprocess_frame
-from dreamer.comms import make_comms
+from dreamer.comms import RsyncExperienceSender, RsyncModelWatcher
 from donkeycar.parts.actuator import PCA9685
 from donkeycar.parts.camera import PiCamera
 
@@ -104,10 +104,6 @@ class PhysicalDreamerCar:
     def __init__(self, args):
         print('\n' + '='*52)
         print(f'  DREAMER TFLITE | channels={args.channels} boost={THROTTLE_BOOST}x')
-        if args.server_ip:
-            print(f'  Connected → server {args.server_ip}')
-        else:
-            print('  Standalone mode (no server)')
         print('='*52)
         self.args = args
         self.steering_ctrl = None
@@ -134,7 +130,8 @@ class PhysicalDreamerCar:
             self.camera = PiCamera(image_w=128, image_h=120)
             time.sleep(2)
 
-            self.sender, self.model_sub = make_comms(args.server_ip)
+            self.sender    = RsyncExperienceSender()
+            self.model_sub = RsyncModelWatcher()
 
             print('[INFO] Connecting PS4 controller...')
             from dreamer.envs.controller import EpisodeController
@@ -204,8 +201,7 @@ class PhysicalDreamerCar:
                     if discard:
                         self.send_zero()
                         print('\n[Car] DISCARD — episode erased, retrying...')
-                        if self.args.server_ip:
-                            self.sender.send_discard(episode_num)
+                        self.sender.send_discard(episode_num)
                         discarded = True
                         break
 
@@ -238,39 +234,34 @@ class PhysicalDreamerCar:
             print(f'\n[Car] Episode {episode_num} done — '
                   f'{steps} steps | reward {total_r:.1f}')
 
-            if self.args.server_ip:
-                self.sender.send(
-                    obs=np.stack(obs_buf).astype(np.float32),
-                    actions=np.stack(act_buf).astype(np.float32),
-                    rewards=np.array(rew_buf, dtype=np.float32),
-                    dones=np.array(done_buf, dtype=bool),
-                    meta={'episode_num': episode_num, 'steps': steps},
-                )
-                print(f'[Car] Episode {episode_num} sent to server.')
+            self.sender.send(
+                obs=np.stack(obs_buf).astype(np.float32),
+                actions=np.stack(act_buf).astype(np.float32),
+                rewards=np.array(rew_buf, dtype=np.float32),
+                dones=np.array(done_buf, dtype=bool),
+                meta={'episode_num': episode_num, 'steps': steps},
+            )
 
             episode_num += 1
 
             if self.ps4.should_quit:
                 break
 
-            if self.args.server_ip and episode_num > self.args.seed_episodes:
+            if episode_num > self.args.seed_episodes:
                 print('[Car] Waiting for server to finish training + export...')
                 wait_start = time.time()
                 while True:
                     self.send_zero()
                     update = self.model_sub.poll()
                     if update:
-                        kb = len(update['model_bytes']) / 1024
-                        print(f'[Car] Receiving weights ({kb:.0f} KB)...', end=' ', flush=True)
                         self.model.reload(update['model_bytes'])
-                        print(f'done. (server step {update["step"]})')
                         break
                     elapsed = time.time() - wait_start
                     if int(elapsed) % 30 == 0 and elapsed > 5:
                         print(f'[Car] Still waiting for server... {elapsed:.0f}s elapsed', end='\r')
                     if elapsed > 600:
                         print(f'\n[Car] WARNING: no model from server after {elapsed:.0f}s — '
-                              f'check server is running and rsync from {self.args.server_ip} is reachable.')
+                              f'check server is running and SSH alias "car" is reachable.')
                         wait_start = time.time()
                     if self.ps4.should_quit:
                         break

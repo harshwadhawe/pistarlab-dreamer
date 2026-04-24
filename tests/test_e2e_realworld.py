@@ -5,8 +5,8 @@ Covers:
   1. Create dummy Dreamer checkpoint (no sim needed)
   2. Export checkpoint → inference.tflite via export_pth_to_tflite.py
   3. Load TFLite + run one inference step (verifies tensor names + shapes)
-  4. ZMQ round-trip: fake car sends episode → mini server loop receives,
-     trains, exports new TFLite, publishes back → car receives + hot-reloads
+  4. File-based comms roundtrip: sender writes npz + sentinel, watcher detects
+     new model via step.txt — verifies uint8 encoding and discard sentinel.
 
 Uses ai_edge_litert (already installed) as a local stand-in for tflite_runtime
 which lives on the Pi5. API is identical.

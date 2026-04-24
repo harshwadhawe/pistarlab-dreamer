@@ -3,118 +3,119 @@ Compare Dreamer vs SAC training runs.
 
 Usage:
     python scripts/compare_dreamer_sac.py \
-        --dreamer results/donkey-warehouse-v0/42/SIM_RGB_HFLIP_NOAUG_.../rewards.csv \
-        --sac     results/donkey-warehouse-v0/42/SAC_SIM_RGB_HFLIP_NOAUG_.../rewards.csv \
-        --out     results/comparison.html
+        --dreamer results/donkey-generated-track-v0/42/<run>/rewards.csv \
+        --sac     results/sac/<run>/rewards.csv \
+        --out     plots/comparison.png
 """
 
 import argparse
+import os
+
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import pandas as pd
-import numpy as np
-import plotly.graph_objs as go
-import plotly.offline as ply
+import seaborn as sns
+
+
+sns.set_theme(style='darkgrid', palette='muted', font_scale=1.1)
+COLORS = {'Dreamer': '#1f77b4', 'SAC': '#ff7f0e'}
+SMOOTH = 5
 
 
 def load(path, label):
     df = pd.read_csv(path)
     df['label'] = label
+    if 'episode_time' in df.columns:
+        df['cum_time_min'] = df['episode_time'].cumsum() / 60
     return df
 
 
-def smooth(series, w=3):
-    return series.rolling(w, min_periods=1).mean()
-
-
-def make_fig(title, xcol, xlabel, dreamer, sac, ycol='reward'):
-    traces = []
-    for df, name, color in [(dreamer, 'Dreamer', '#1f77b4'), (sac, 'SAC', '#ff7f0e')]:
-        if xcol not in df.columns:
+def plot_metric(ax, dreamer, sac, xcol, ycol, xlabel, ylabel, title):
+    for df, name in [(dreamer, 'Dreamer'), (sac, 'SAC')]:
+        if xcol not in df.columns or ycol not in df.columns:
             continue
         x = df[xcol]
         y = df[ycol]
-        traces.append(go.Scatter(x=x, y=smooth(y), name=name,
-                                 line=dict(color=color, width=2)))
-        traces.append(go.Scatter(x=x, y=y, name=f'{name} (raw)',
-                                 line=dict(color=color, width=1, dash='dot'),
-                                 opacity=0.4))
-    fig = go.Figure(traces)
-    fig.update_layout(title=title, xaxis_title=xlabel, yaxis_title='Reward',
-                      height=400, legend=dict(x=0.01, y=0.99))
-    return ply.plot(fig, include_plotlyjs='cdn' if traces == traces[:2] else False,
-                    output_type='div')
-
-
-def summary_table(dreamer, sac, threshold=700.0):
-    rows = []
-    for df, name in [(dreamer, 'Dreamer'), (sac, 'SAC')]:
-        solved_eps = df[df['reward'] >= threshold]
-        first_solve = int(solved_eps['episode'].iloc[0]) if not solved_eps.empty else None
-        rows.append({
-            'Method':             name,
-            'Episodes run':       len(df),
-            'Max reward':         round(df['reward'].max(), 1),
-            'Mean reward (last 5)': round(df['reward'].tail(5).mean(), 1),
-            'First ep ≥ 700':    first_solve if first_solve else '—',
-            'Total time (s)':    round(df['episode_time'].sum(), 1) if 'episode_time' in df.columns else '—',
-            'Mean ep time (s)':  round(df['episode_time'].mean(), 1) if 'episode_time' in df.columns else '—',
-        })
-
-    header = list(rows[0].keys())
-    table  = go.Figure(go.Table(
-        header=dict(values=header, fill_color='#1f3b5c', font=dict(color='white', size=13), align='left'),
-        cells=dict(
-            values=[[r[h] for r in rows] for h in header],
-            fill_color=[['#eaf0fb', '#fff4e5']],
-            align='left', font=dict(size=12),
-        ),
-    ))
-    table.update_layout(title='Summary', height=180)
-    return ply.plot(table, include_plotlyjs=False, output_type='div')
-
-
-def cumulative_time(df):
-    if 'episode_time' not in df.columns:
-        return None
-    df = df.copy()
-    df['cum_time'] = df['episode_time'].cumsum()
-    return df
+        y_smooth = y.rolling(SMOOTH, min_periods=1).mean()
+        ax.plot(x, y, color=COLORS[name], alpha=0.2, linewidth=1)
+        ax.plot(x, y_smooth, color=COLORS[name], linewidth=2, label=name)
+    ax.set_title(title)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.legend()
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dreamer', required=True)
-    parser.add_argument('--sac',     required=True)
-    parser.add_argument('--out',     default='results/comparison.html')
-    parser.add_argument('--threshold', type=float, default=700.0,
-                        help='Reward threshold for "solved"')
+    parser.add_argument('--dreamer',   required=True)
+    parser.add_argument('--sac',       required=True)
+    parser.add_argument('--out',       default='plots/comparison.png')
+    parser.add_argument('--threshold', type=float, default=500.0)
     args = parser.parse_args()
 
     dreamer = load(args.dreamer, 'Dreamer')
     sac     = load(args.sac,     'SAC')
 
-    dreamer_t = cumulative_time(dreamer)
-    sac_t     = cumulative_time(sac)
+    for df in (dreamer, sac):
+        if 'wall_time' in df.columns:
+            df['wall_time_min'] = df['wall_time'] / 60
+    has_time = 'wall_time_min' in dreamer.columns and 'wall_time_min' in sac.columns
+    n_rows = 3 if has_time else 2
+    fig, axes = plt.subplots(n_rows, 2, figsize=(14, 5 * n_rows))
+    fig.suptitle('Dreamer vs SAC — Sim Comparison', fontsize=15, fontweight='bold', y=1.01)
 
-    divs = ['<html><head><title>Dreamer vs SAC</title></head><body>']
-    divs.append('<h2 style="font-family:sans-serif">Dreamer vs SAC — Sim Comparison</h2>')
+    plot_metric(axes[0, 0], dreamer, sac, 'episode', 'reward',
+                'Episode', 'Reward', 'Reward vs Episodes')
+    plot_metric(axes[0, 1], dreamer, sac, 'steps', 'reward',
+                'Env Steps', 'Reward', 'Reward vs Env Steps')
+    plot_metric(axes[1, 0], dreamer, sac, 'episode', 'survival_rate',
+                'Episode', 'Survival Rate', 'Survival Rate vs Episodes')
+    plot_metric(axes[1, 1], dreamer, sac, 'episode', 'mean_throttle',
+                'Episode', 'Mean Throttle', 'Mean Throttle vs Episodes')
 
-    divs.append(summary_table(dreamer, sac, args.threshold))
-    divs.append(make_fig('Reward vs Episodes', 'episode', 'Episode', dreamer, sac))
-    divs.append(make_fig('Reward vs Env Steps', 'steps', 'Env Steps', dreamer, sac))
+    if has_time:
+        plot_metric(axes[2, 0], dreamer, sac, 'wall_time_min', 'reward',
+                    'Time (min)', 'Reward', 'Reward vs Wall-Clock Time (incl. VAE/seed)')
+        # Summary table in axes[2, 1]
+        ax_tbl = axes[2, 1]
+        ax_tbl.axis('off')
+        rows = []
+        for df, name in [(dreamer, 'Dreamer'), (sac, 'SAC')]:
+            solved = df[df['reward'] >= args.threshold]
+            rows.append([
+                name,
+                len(df),
+                f"{df['reward'].max():.1f}",
+                f"{df['reward'].tail(10).mean():.1f}",
+                int(solved['episode'].iloc[0]) if not solved.empty else '—',
+                f"{df['wall_time_min'].max():.1f}" if 'wall_time_min' in df.columns else '—',
+            ])
+        col_labels = ['Method', 'Episodes', 'Max\nReward', 'Mean\n(last 10)',
+                      f'First ≥{args.threshold:.0f}', 'Total\nTime (min)']
+        tbl = ax_tbl.table(cellText=rows, colLabels=col_labels,
+                           loc='center', cellLoc='center')
+        tbl.auto_set_font_size(False)
+        tbl.set_fontsize(11)
+        tbl.scale(1, 2)
+        for (r, c), cell in tbl.get_celld().items():
+            if r == 0:
+                cell.set_facecolor('#1f3b5c')
+                cell.set_text_props(color='white', fontweight='bold')
+            elif r == 1:
+                cell.set_facecolor('#eaf0fb')
+            else:
+                cell.set_facecolor('#fff4e5')
+        ax_tbl.set_title('Summary', fontweight='bold', pad=10)
 
-    if dreamer_t is not None and sac_t is not None:
-        divs.append(make_fig('Reward vs Wall-Clock Time (s)', 'cum_time', 'Cumulative Time (s)',
-                             dreamer_t, sac_t))
-
-    divs.append('</body></html>')
-
+    plt.tight_layout()
     os.makedirs(os.path.dirname(args.out) if os.path.dirname(args.out) else '.', exist_ok=True)
-    with open(args.out, 'w') as f:
-        f.write('\n'.join(divs))
+    plt.savefig(args.out, dpi=150, bbox_inches='tight')
+    plt.close()
 
     print(f'Saved → {args.out}')
+    print(f'Dreamer: {len(dreamer)} episodes  max={dreamer["reward"].max():.1f}')
+    print(f'SAC:     {len(sac)} episodes  max={sac["reward"].max():.1f}')
 
 
-import os
 if __name__ == '__main__':
     main()

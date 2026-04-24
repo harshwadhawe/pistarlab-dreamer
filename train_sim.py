@@ -35,6 +35,7 @@ print(
 # ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
+script_start = time.time()
 timestamp  = datetime.now().strftime('%Y%m%d_%H%M%S')
 run_name   = f'{args.experiment_name}_{timestamp}' if args.experiment_name else timestamp
 run_dir    = os.path.join('results', args.env, str(args.seed), run_name)
@@ -48,7 +49,7 @@ csv_path  = os.path.join(run_dir, 'rewards.csv')
 csv_file  = open(csv_path, 'w', newline='')
 csv_writer = csv.writer(csv_file)
 csv_writer.writerow([
-    'episode', 'steps', 'reward', 'episode_time',
+    'episode', 'steps', 'reward', 'episode_time', 'wall_time',
     'mean_cte', 'max_cte', 'min_cte', 'std_cte', 'survival_rate', 'mean_throttle',
     'obs_loss', 'kl_loss', 'reward_loss', 'actor_loss', 'value_loss',
 ])
@@ -228,6 +229,7 @@ for episode in tqdm(
         metrics['steps'][-1],
         round(total_reward, 4),
         round(time.time() - ep_start, 2),
+        round(time.time() - script_start, 1),
         # driving quality (mean=abs mean, max/min=signed for left/right visibility)
         round(float(np.abs(cte_arr).mean()), 4),
         round(float(cte_arr.max()), 4),

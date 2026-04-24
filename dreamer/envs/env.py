@@ -107,6 +107,8 @@ class DonkeyCarEnv:
         self._episode_reward += reward_k
         self.last_speed = speed
         self.last_hit = hit
+        if self.t >= self.max_episode_length:
+            truncated = True
         done = terminated or truncated
         observation = _images_to_observation(state, channels=self._channels)
         return observation, reward_k, done

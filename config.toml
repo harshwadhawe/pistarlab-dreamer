@@ -35,8 +35,8 @@ aug_crop_frac         = 0.9         # crop to this fraction then resize back
 # ── DonkeyCar action constraints ─────────────────────────────────────────────
 fix_speed             = false        # true → steering only; false → variable throttle
 throttle_base         = 0.28        # fixed throttle when fix_speed=true
-throttle_min          = 0.25
-throttle_max          = 0.35
+throttle_min          = 0.0
+throttle_max          = 0.4
 angle_min             = -1.0
 angle_max             = 1.0
 
@@ -97,12 +97,12 @@ disable_cuda          = false
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Experiment ── (change these most often) ───────────────────────────────────
-env                   = "donkey-warehouse-v0"
+env                   = "donkey-generated-track-v0"
 hflip                 = true
-fix_speed             = true       # variable throttle [0.1, 0.5]
+fix_speed             = false
 
 # ── Run length ────────────────────────────────────────────────────────────────
-episodes              = 1000
+episodes              = 30
 experience_size       = 1000000
 max_episode_length    = 1000
 
@@ -115,8 +115,8 @@ port                  = 9091
 human_override        = true
 
 # ── Episode termination ───────────────────────────────────────────────────────
-cte_left              = 11.0         # --automated only: max CTE toward left (more forgiving)
-cte_right             = 4.0         # --automated only: max CTE toward right (tighter, ref is right lane)
+cte_left              = 6.0         # --automated only: max CTE toward left (more forgiving)
+cte_right             = 2.0         # --automated only: max CTE toward right (tighter, ref is right lane)
 stuck_speed_threshold = 0.1
 stuck_steps_limit     = 15
 
@@ -154,6 +154,8 @@ pi_workdir            = "~/pistarlab-dreamer"  # Pi working directory (rsync bas
 push_interval         = 1           # export + push TFLite every N episodes
 checkpoint_interval   = 50
 smooth_weight         = 0.1         # override: real car needs more smoothing than sim
+throttle_min          = 0.0        # real car safe range — override common's 0.0
+throttle_max          = 0.4
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -165,3 +167,39 @@ smooth_weight         = 0.1         # override: real car needs more smoothing th
 server_ip             = "192.168.0.103"   # Mac IP — run `ipconfig getifaddr en0`
 model                 = ""                # leave empty to auto-select from models/
 max_episode_steps     = 1000              # auto-end episode after N steps (~33s at 60fps)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+[sac]
+# SAC + VAE comparison baseline. Most hyperparams inherited from [common].
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Sim connection ────────────────────────────────────────────────────────────
+env                   = "donkey-generated-track-v0"
+sim_path              = "self"
+host                  = "127.0.0.1"
+port                  = 9091
+max_episode_length    = 1000
+cte_left              = 6.0
+cte_right             = 2.0
+stuck_speed_threshold = 0.1
+stuck_steps_limit     = 15
+survival_bonus        = 0.5
+
+# ── Run ───────────────────────────────────────────────────────────────────────
+episodes              = 150
+experience_size       = 500000
+results_dir           = "results/sac"
+seed_data             = "SAC/data/frames.npz"
+
+# ── VAE ───────────────────────────────────────────────────────────────────────
+z_dim                 = 128
+vae_lr                = 3e-4
+vae_epochs            = 200
+vae_beta              = 0.1
+
+# ── SAC (remaining hyperparams — batch_size, actor_lr, value_lr, discount,
+#         polyak, fix_speed — inherited from [common]) ──────────────────────
+throttle_min          = 0.15             # prevent throttle collapse (override common's 0.0)
+throttle_max          = 0.4
+collect_interval      = 50               # gradient steps per episode (seed phase only)

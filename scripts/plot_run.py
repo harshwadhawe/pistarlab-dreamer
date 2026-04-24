@@ -5,50 +5,63 @@ Called automatically during training (every test_interval episodes).
 Also usable as a standalone script after training.
 
 Usage:
-  python scripts/plot_run.py results/donkey-generated-roads-v0/1/rewards_*.csv
-  python scripts/plot_run.py results/real/rewards_20260418_120000.csv
+  python scripts/plot_run.py results/donkey-generated-roads-v0/1/<run>/rewards.csv
+  python scripts/plot_run.py results/real/<run>/rewards.csv
 """
 
 import glob
 import os
 import sys
 
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+
+sns.set_theme(style='darkgrid', font_scale=1.05)
+SMOOTH = 5
+
 
 def generate_plots(csv_path: str, out_dir: str) -> None:
-    """Regenerate plots.html in out_dir from csv_path. Called during training."""
-    import pandas as pd
-    import plotly.graph_objs as go
-    import plotly.offline as ply
-
     df = pd.read_csv(csv_path)
 
-    LOSS_COLS = ['obs_loss', 'kl_loss', 'reward_loss', 'actor_loss', 'value_loss']
-    LOSS_COLS = [c for c in LOSS_COLS if c in df.columns]
+    metric_groups = [
+        ('reward',       ['reward'],                              'Reward'),
+        ('losses',       [c for c in ['obs_loss', 'kl_loss', 'reward_loss'] if c in df.columns], 'World Model Loss'),
+        ('policy',       [c for c in ['actor_loss', 'value_loss'] if c in df.columns],           'Policy Loss'),
+        ('tracking',     [c for c in ['mean_cte', 'std_cte'] if c in df.columns],                'CTE'),
+        ('behaviour',    [c for c in ['survival_rate', 'mean_throttle'] if c in df.columns],     'Behaviour'),
+    ]
+    metric_groups = [(k, cols, title) for k, cols, title in metric_groups if cols]
 
-    fig_traces = {
-        'reward': [go.Scatter(x=df['episode'], y=df['reward'], name='reward', mode='lines')],
-        **{c:     [go.Scatter(x=df['episode'], y=df[c],        name=c,        mode='lines')]
-           for c in LOSS_COLS},
-    }
-    if 'mean_cte' in df.columns:
-        fig_traces['mean_cte'] = [go.Scatter(x=df['episode'], y=df['mean_cte'], name='mean_cte', mode='lines')]
+    n = len(metric_groups)
+    fig, axes = plt.subplots(n, 1, figsize=(12, 4 * n), sharex=True)
+    if n == 1:
+        axes = [axes]
 
-    plots = []
-    for title, traces in fig_traces.items():
-        fig = go.Figure(traces)
-        fig.update_layout(title=title, xaxis_title='episode', yaxis_title=title, height=350)
-        plots.append(ply.plot(fig, include_plotlyjs='cdn', output_type='div'))
+    for ax, (_, cols, title) in zip(axes, metric_groups):
+        for col in cols:
+            y = df[col]
+            y_s = y.rolling(SMOOTH, min_periods=1).mean()
+            ax.plot(df['episode'], y,   alpha=0.2, linewidth=1)
+            ax.plot(df['episode'], y_s, linewidth=2, label=col)
+        ax.set_ylabel(title)
+        ax.legend(loc='upper left')
 
-    out = os.path.join(out_dir, 'plots.html')
-    with open(out, 'w') as f:
-        f.write('<html><body>' + ''.join(plots) + '</body></html>')
+    axes[-1].set_xlabel('Episode')
+    fig.suptitle(os.path.basename(os.path.dirname(csv_path)), fontsize=13, fontweight='bold')
+    plt.tight_layout()
+
+    out = os.path.join(out_dir, 'plots.png')
+    plt.savefig(out, dpi=130, bbox_inches='tight')
+    plt.close()
+    return out
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('csv', nargs='+', help='One or more rewards CSV files (globs ok)')
-    parser.add_argument('--out', default=None, help='Output HTML path (default: alongside CSV)')
+    parser.add_argument('--out', default=None, help='Output PNG path (default: alongside CSV)')
     args = parser.parse_args()
 
     paths = []
@@ -57,21 +70,17 @@ if __name__ == '__main__':
     if not paths:
         sys.exit('No CSV files found.')
 
-    import pandas as pd
     frames = [pd.read_csv(p) for p in sorted(paths)]
-    import pandas as pd_inner
-    df = pd_inner.concat(frames, ignore_index=True)
+    df = pd.concat(frames, ignore_index=True)
 
-    out_dir = os.path.dirname(sorted(paths)[0])
-    out = args.out or os.path.join(out_dir, 'plots.html')
-
-    # Reuse generate_plots by writing a temp combined CSV
+    out_dir = os.path.dirname(os.path.abspath(sorted(paths)[0]))
     tmp = os.path.join(out_dir, '_tmp_combined.csv')
     df.to_csv(tmp, index=False)
-    generate_plots(tmp, out_dir)
+    out = generate_plots(tmp, out_dir)
     os.remove(tmp)
+
     if args.out:
-        os.rename(os.path.join(out_dir, 'plots.html'), args.out)
+        os.rename(out, args.out)
         print(f'Saved → {args.out}')
     else:
         print(f'Saved → {out}')
