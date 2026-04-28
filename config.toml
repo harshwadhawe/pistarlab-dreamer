@@ -1,0 +1,205 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dreamer Config
+# Edit this file to change training settings.
+# Sim uses [common] + [sim]. Real uses [common] + [real].
+# [real] and [sim] keys override [common] when they share a name.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[common]
+
+# ── Experiment identity ── (change these most often) ──────────────────────────
+experiment_name       = "SIM_RGB_NOHFLIP_NOAUG"          # tag appended to rewards CSV; empty = timestamp
+seed                  = 42
+
+# ── Observation ───────────────────────────────────────────────────────────────
+grayscale             = false       # true → 1-channel, false → 3-channel RGB; must match exported TFLite
+
+# ── Augmentation ──────────────────────────────────────────────────────────────
+augment               = false       # DrQ pixel augmentation
+hflip                 = false       # append horizontally-flipped copy of each episode
+
+# Augmentation parameters (only used when augment=true)
+aug_brightness        = 0.3         # ±brightness shift  (tuned from IL)
+aug_contrast          = 0.2         # ±contrast scale
+aug_shadow_prob       = 0.3         # probability of shadow band  (was 0.5 — too frequent)
+aug_shadow_intensity  = 0.7         # shadow multiplier  (was 0.4 — too dark; real shadows ~30% reduction)
+aug_blur_prob         = 0.05        # probability of gaussian blur  (tuned from IL)
+aug_blur_kernel       = 5           # blur kernel size (pixels)
+aug_noise_std         = 0.02        # gaussian noise standard deviation
+aug_gamma_lo          = 0.8         # gamma lower bound  (was 0.7 — too overexposed for Pi camera)
+aug_gamma_hi          = 1.4         # gamma upper bound
+aug_erase_prob        = 0.2         # probability of random erase / cutout
+aug_erase_max_frac    = 0.12        # max erased area  (was 0.2 — 13×13px wipes entire road on 64×64)
+aug_crop_frac         = 0.9         # crop to this fraction then resize back
+
+# ── DonkeyCar action constraints ─────────────────────────────────────────────
+fix_speed             = false        # true → steering only; false → variable throttle
+throttle_base         = 0.3        # fixed throttle when fix_speed=true
+throttle_min          = 0.0
+throttle_max          = 0.4
+angle_min             = -1.0
+angle_max             = 1.0
+
+# ── Resume (leave empty to start fresh) ──────────────────────────────────────
+models                = ""
+experience_replay     = ""
+
+# ── Architecture ──────────────────────────────────────────────────────────────
+embedding_size        = 512
+hidden_size           = 200
+belief_size           = 128
+state_size            = 20
+action_size           = 2
+cnn_act               = "relu"
+dense_act             = "elu"
+
+# ── World model ───────────────────────────────────────────────────────────────
+free_nats             = 1.0
+reward_scale          = 10
+pcont                 = false
+pcont_scale           = 10
+
+# ── Training ──────────────────────────────────────────────────────────────────
+seed_episodes         = 5
+collect_interval      = 50
+batch_size            = 50
+chunk_size            = 50
+world_lr              = 6e-4
+actor_lr              = 8e-5
+value_lr              = 8e-5
+adam_epsilon          = 1e-7
+grad_clip_norm        = 100.0
+learning_rate_schedule = 0
+
+# ── Policy ────────────────────────────────────────────────────────────────────
+planning_horizon      = 15
+discount              = 0.99
+disclam               = 0.95
+polyak                = 0.005
+expl_amount           = 0.15
+with_logprob          = false
+auto_temp             = false
+temp                  = 0.003
+kl_balance            = true
+symlog_rewards        = true
+return_norm           = true
+
+# ── Smoothing ─────────────────────────────────────────────────────────────────
+smooth_weight         = 0.0         # steering jitter penalty (0 = off)
+smooth_window         = 10
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+disable_cuda          = false
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+[sim]
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Experiment ── (change these most often) ───────────────────────────────────
+env                   = "donkey-generated-track-v0"
+hflip                 = true
+fix_speed             = false
+
+# ── Run length ────────────────────────────────────────────────────────────────
+episodes              = 50
+experience_size       = 1000000
+max_episode_length    = 1000
+
+# ── Simulator connection ──────────────────────────────────────────────────────
+sim_path              = "self"      # "self" = manually launched sim
+host                  = "127.0.0.1"
+port                  = 9091
+
+# ── Human override ────────────────────────────────────────────────────────────
+human_override        = true
+
+# ── Episode termination ───────────────────────────────────────────────────────
+cte_left              = 6.0         # --automated only: max CTE toward left (more forgiving)
+cte_right             = 2.0         # --automated only: max CTE toward right (tighter, ref is right lane)
+stuck_speed_threshold = 0.1
+stuck_steps_limit     = 15
+
+# ── Reward (human_override=true path only) ────────────────────────────────────
+survival_bonus        = 0.5        # added to throttle each step when not terminated
+
+# ── Evaluation ────────────────────────────────────────────────────────────────
+test                  = false
+test_interval         = 5
+test_episodes         = 1
+
+# ── Checkpointing ─────────────────────────────────────────────────────────────
+checkpoint_interval   = 500
+checkpoint_experience = false
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+[real]
+# train_real_server.py — runs on Mac/Linux
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Run length ────────────────────────────────────────────────────────────────
+episodes              = 30
+experience_size       = 50000       # ~230 MB for RGB
+results_dir           = "results/real"
+
+# ── Policy ────────────────────────────────────────────────────────────────────
+expl_amount           = 0.0         # TFLite inference is deterministic
+
+# ── Car communication ─────────────────────────────────────────────────────────
+pi_alias              = "car"       # SSH alias for Pi (Mac ~/.ssh/config Host entry)
+pi_workdir            = "~/pistarlab-dreamer"  # Pi working directory (rsync base path)
+
+# ── Model/checkpoint cadence ──────────────────────────────────────────────────
+push_interval         = 1           # export + push TFLite every N episodes
+checkpoint_interval   = 50
+smooth_weight         = 0.1         # override: real car needs more smoothing than sim
+throttle_min          = 0.0        # real car safe range — override common's 0.0
+throttle_max          = 0.4
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+[pi]
+# train_real_pi.py — runs on Pi5
+# Edit server_ip before each session.
+# ─────────────────────────────────────────────────────────────────────────────
+
+server_ip             = "192.168.0.103"   # Mac IP — run `ipconfig getifaddr en0`
+model                 = ""                # leave empty to auto-select from models/
+max_episode_steps     = 1000              # auto-end episode after N steps (~33s at 60fps)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+[sac]
+# SAC + VAE comparison baseline. Most hyperparams inherited from [common].
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Sim connection ────────────────────────────────────────────────────────────
+env                   = "donkey-generated-track-v0"
+sim_path              = "self"
+host                  = "127.0.0.1"
+port                  = 9091
+max_episode_length    = 1000
+cte_left              = 6.0
+cte_right             = 2.0
+stuck_speed_threshold = 0.1
+stuck_steps_limit     = 15
+survival_bonus        = 0.5
+
+# ── Run ───────────────────────────────────────────────────────────────────────
+episodes              = 150
+experience_size       = 500000
+results_dir           = "results/sac"
+seed_data             = "SAC/data/frames.npz"
+
+# ── VAE ───────────────────────────────────────────────────────────────────────
+z_dim                 = 128
+vae_lr                = 3e-4
+vae_epochs            = 200
+vae_beta              = 0.1
+
+# ── SAC (remaining hyperparams — batch_size, actor_lr, value_lr, discount,
+#         polyak, fix_speed — inherited from [common]) ──────────────────────
+throttle_min          = 0.15             # prevent throttle collapse (override common's 0.0)
+throttle_max          = 0.4
+collect_interval      = 50               # gradient steps per episode (seed phase only)

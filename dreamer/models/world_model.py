@@ -94,20 +94,6 @@ class TransitionModel(nn.Module):
         return result
 
 
-class SymbolicObservationModel(jit.ScriptModule):
-    def __init__(self, observation_size, belief_size, state_size, embedding_size, activation_function='relu'):
-        super().__init__()
-        self.act_fn = getattr(F, activation_function)
-        self.fc1 = nn.Linear(belief_size + state_size, embedding_size)
-        self.fc2 = nn.Linear(embedding_size, embedding_size)
-        self.fc3 = nn.Linear(embedding_size, observation_size)
-
-    @jit.script_method
-    def forward(self, belief, state):
-        hidden = self.act_fn(self.fc1(torch.cat([belief, state], dim=1)))
-        hidden = self.act_fn(self.fc2(hidden))
-        return self.fc3(hidden)
-
 
 class VisualObservationModel(jit.ScriptModule):
     """
@@ -142,26 +128,10 @@ class VisualObservationModel(jit.ScriptModule):
         return self.conv4(hidden)
 
 
-def ObservationModel(symbolic, observation_size, belief_size, state_size, embedding_size, activation_function='relu'):
-    if symbolic:
-        return SymbolicObservationModel(observation_size, belief_size, state_size, embedding_size, activation_function)
+def ObservationModel(observation_size, belief_size, state_size, embedding_size, activation_function='relu'):
     channels = observation_size[0]
     return VisualObservationModel(belief_size, state_size, embedding_size, activation_function, channels=channels)
 
-
-class SymbolicEncoder(jit.ScriptModule):
-    def __init__(self, observation_size, embedding_size, activation_function='relu'):
-        super().__init__()
-        self.act_fn = getattr(F, activation_function)
-        self.fc1 = nn.Linear(observation_size, embedding_size)
-        self.fc2 = nn.Linear(embedding_size, embedding_size)
-        self.fc3 = nn.Linear(embedding_size, embedding_size)
-
-    @jit.script_method
-    def forward(self, observation):
-        hidden = self.act_fn(self.fc1(observation))
-        hidden = self.act_fn(self.fc2(hidden))
-        return self.fc3(hidden)
 
 
 class VisualEncoder(jit.ScriptModule):
@@ -196,9 +166,7 @@ class VisualEncoder(jit.ScriptModule):
         return self.fc(hidden)
 
 
-def Encoder(symbolic, observation_size, embedding_size, activation_function='relu'):
-    if symbolic:
-        return SymbolicEncoder(observation_size, embedding_size, activation_function)
+def Encoder(observation_size, embedding_size, activation_function='relu'):
     channels = observation_size[0]
     return VisualEncoder(embedding_size, activation_function, channels=channels)
 

@@ -1,0 +1,70 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand*\HyPL@Entry[1]{}
+\citation{donkeycar}
+\citation{hafner2019dream}
+\citation{hafner2020dreamerv2}
+\citation{hafner2023dreamerv3}
+\citation{haarnoja2018sac}
+\citation{kingma2014vae}
+\citation{ha2018worldmodels}
+\citation{hafner2019dream}
+\citation{hafner2020dreamerv2}
+\citation{hafner2023dreamerv3}
+\citation{haarnoja2018sac}
+\citation{higgins2017betavae}
+\HyPL@Entry{0<</S/D>>}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Background}{1}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Dreamer}{1}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}SAC+VAE}{1}{subsection.2.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Method}{1}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Observation Pipeline}{1}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Reward Design}{1}{subsection.3.2}\protected@file@percent }
+\newlabel{sec:reward}{{3.2}{1}{Reward Design}{subsection.3.2}{}}
+\citation{laskin2020curl}
+\citation{bjorck2021high}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Dreamer Architecture}{2}{subsection.3.3}\protected@file@percent }
+\newlabel{sec:dreamer}{{3.3}{2}{Dreamer Architecture}{subsection.3.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces RSSM architecture (ours vs.\ DreamerV2).}}{2}{table.caption.1}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:arch}{{1}{2}{RSSM architecture (ours vs.\ DreamerV2)}{table.caption.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}SAC+VAE Architecture}{2}{subsection.3.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Training Protocol}{2}{subsection.3.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Dreamer.}{2}{subsection.3.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{SAC+VAE.}{2}{subsection.3.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Timing accounting.}{2}{subsection.3.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experiments}{2}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Setup}{2}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Results}{2}{subsection.4.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Summary of results on the generated track, single run.}}{2}{table.caption.6}\protected@file@percent }
+\newlabel{tab:results}{{2}{2}{Summary of results on the generated track, single run}{table.caption.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{Sample efficiency.}{2}{table.caption.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Wall-clock time.}{2}{table.caption.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Policy stability.}{2}{table.caption.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Discussion}{2}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Reward Transferability}{2}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Limitations}{2}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Future Work}{2}{subsection.5.3}\protected@file@percent }
+\bibstyle{abbrv}
+\bibdata{refs}
+\bibcite{bjorck2021high}{1}
+\bibcite{ha2018worldmodels}{2}
+\bibcite{haarnoja2018sac}{3}
+\bibcite{hafner2019dream}{4}
+\bibcite{hafner2020dreamerv2}{5}
+\bibcite{hafner2023dreamerv3}{6}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Dreamer architecture. \emph  {Top — World Model (RSSM):} A CNN encoder produces embedding $e_t$. The GRU updates deterministic belief $h_t$; a Gaussian posterior $q(z_t|h_t,e_t)$ is trained against prior $p(z_t|h_t)$ via a KL penalty. Recurrence feeds $h_{t-1}$ and $a_{t-1}$ back into the GRU each step. \emph  {Bottom — Policy:} State $s_t{=}(h_t,z_t)$ seeds $H{=}15$-step imagined rollouts; actor (REINFORCE) and twin critic ($\lambda $-return) losses are computed purely in latent space — no environment interaction during updates.}}{3}{figure.caption.2}\protected@file@percent }
+\newlabel{fig:dreamer_arch}{{1}{3}{Dreamer architecture. \emph {Top — World Model (RSSM):} A CNN encoder produces embedding $e_t$. The GRU updates deterministic belief $h_t$; a Gaussian posterior $q(z_t|h_t,e_t)$ is trained against prior $p(z_t|h_t)$ via a KL penalty. Recurrence feeds $h_{t-1}$ and $a_{t-1}$ back into the GRU each step. \emph {Bottom — Policy:} State $s_t{=}(h_t,z_t)$ seeds $H{=}15$-step imagined rollouts; actor (REINFORCE) and twin critic ($\lambda $-return) losses are computed purely in latent space — no environment interaction during updates}{figure.caption.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Conclusion}{3}{section.6}\protected@file@percent }
+\bibcite{higgins2017betavae}{7}
+\bibcite{kingma2014vae}{8}
+\bibcite{donkeycar}{9}
+\bibcite{laskin2020curl}{10}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces SAC+VAE architecture. \emph  {Top — Phase 1 (Visual Representation):} A $\beta $-VAE ($\beta {=}0.1$) is pre-trained on 30 random-exploration episodes. The encoder maps images to 128-D Gaussian latents; the decoder reconstructs observations for the combined loss. \emph  {Bottom — Phase 2 (Q-Learning):} The encoder is frozen; SAC trains twin Q-networks and an EMA target on $(z_t,a_t,r_t,z_{t+1})$ replay tuples. No temporal model or recurrence — every frame is processed independently.}}{4}{figure.caption.3}\protected@file@percent }
+\newlabel{fig:sac_arch}{{2}{4}{SAC+VAE architecture. \emph {Top — Phase 1 (Visual Representation):} A $\beta $-VAE ($\beta {=}0.1$) is pre-trained on 30 random-exploration episodes. The encoder maps images to 128-D Gaussian latents; the decoder reconstructs observations for the combined loss. \emph {Bottom — Phase 2 (Q-Learning):} The encoder is frozen; SAC trains twin Q-networks and an EMA target on $(z_t,a_t,r_t,z_{t+1})$ replay tuples. No temporal model or recurrence — every frame is processed independently}{figure.caption.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Training curves. \textcolor {dreamerblue}{\textbf  {Dreamer}} (blue) vs.\ \textcolor {sacred}{\textbf  {SAC+VAE}} (red). Shaded region shows raw episode values; solid line is a 5-episode rolling mean. Left: reward vs.\ episodes. Centre: reward vs.\ environment steps. Right: reward vs.\ wall-clock time including all setup costs.}}{5}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:curves}{{3}{5}{Training curves. \textcolor {dreamerblue}{\textbf {Dreamer}} (blue) vs.\ \textcolor {sacred}{\textbf {SAC+VAE}} (red). Shaded region shows raw episode values; solid line is a 5-episode rolling mean. Left: reward vs.\ episodes. Centre: reward vs.\ environment steps. Right: reward vs.\ wall-clock time including all setup costs}{figure.caption.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Survival rate (fraction of max episode length completed) vs.\ episodes. A value of 1.0 indicates a full lap without crashing.}}{5}{figure.caption.5}\protected@file@percent }
+\newlabel{fig:survival}{{4}{5}{Survival rate (fraction of max episode length completed) vs.\^^Mepisodes. A value of 1.0 indicates a full lap without crashing}{figure.caption.5}{}}
+\gdef \@abspage@last{5}

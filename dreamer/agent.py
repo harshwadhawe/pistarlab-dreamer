@@ -1,6 +1,6 @@
+import os
 from copy import deepcopy
 
-import cv2
 import numpy as np
 import torch
 from torch import nn, optim
@@ -8,8 +8,10 @@ from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 from torch.distributions.independent import Independent
 from torch.nn import functional as F
+from torchvision.utils import make_grid, save_image
 from tqdm import tqdm
 
+from .augmentations import Augmenter
 from .memory import ExperienceReplay
 from .models import (
     bottle, Encoder, ObservationModel, RewardModel,
@@ -37,9 +39,8 @@ class Dreamer:
         ).to(device=args.device)
 
         self.observation_model = ObservationModel(
-            args.symbolic, args.observation_size,
-            args.belief_size, args.state_size, args.embedding_size,
-            activation_function=(args.dense_act if args.symbolic else args.cnn_act),
+            args.observation_size,
+            args.belief_size, args.state_size, args.embedding_size, args.cnn_act,
         ).to(device=args.device)
 
         self.reward_model = RewardModel(
@@ -47,7 +48,7 @@ class Dreamer:
         ).to(device=args.device)
 
         self.encoder = Encoder(
-            args.symbolic, args.observation_size, args.embedding_size, args.cnn_act,
+            args.observation_size, args.embedding_size, args.cnn_act,
         ).to(device=args.device)
 
         self.actor_model = ActorModel(
@@ -55,6 +56,8 @@ class Dreamer:
             activation_function=args.dense_act,
             fix_speed=args.fix_speed,
             throttle_base=args.throttle_base,
+            throttle_min=args.throttle_min,
+            throttle_max=args.throttle_max,
         ).to(device=args.device)
 
         self.value_model = ValueModel(
@@ -95,24 +98,34 @@ class Dreamer:
         self.free_nats = torch.full((1,), args.free_nats, dtype=torch.float32, device=args.device)
 
         self.D = ExperienceReplay(
-            args.experience_size, args.symbolic, args.observation_size,
-            args.action_size, args.bit_depth, args.device,
+            args.experience_size, args.observation_size,
+            args.action_size, args.device,
         )
 
-        if self.args.auto_temp:
-            self.log_temp = torch.zeros(1, requires_grad=True, device=args.device)
-            self.target_entropy = -np.prod(
-                args.action_size if not args.fix_speed else self.args.action_size - 1
-            ).item()
-            self.temp_optimizer = optim.Adam([self.log_temp], lr=args.value_lr)
+        self.augmenter = Augmenter(
+            brightness=args.aug_brightness,
+            contrast=args.aug_contrast,
+            shadow_prob=args.aug_shadow_prob,
+            shadow_intensity=args.aug_shadow_intensity,
+            blur_prob=args.aug_blur_prob,
+            blur_kernel=args.aug_blur_kernel,
+            noise_std=args.aug_noise_std,
+            gamma_range=(args.aug_gamma_lo, args.aug_gamma_hi),
+            erase_prob=args.aug_erase_prob,
+            erase_max_frac=args.aug_erase_max_frac,
+            crop_frac=args.aug_crop_frac,
+            device=args.device,
+        ) if args.augment else None
+
+        world_params  = sum(np.prod(p.shape) for p in self.world_param)
+        actor_params  = sum(np.prod(p.shape) for p in self.actor_model.parameters())
+        value_params  = sum(np.prod(p.shape) for p in self.value_model.parameters())
+        print(f'[Agent] Model created — world {world_params/1e6:.2f}M  actor {actor_params/1e6:.2f}M  value {value_params/1e6:.2f}M  device={args.device}')
 
         # Return normalisation EMAs (Dreamer v3)
         self._ret_ema_low = 1.0
         self._ret_ema_high = 1.0
-
-    def process_im(self, images, image_size=64, rgb=None):
-        from .envs.env import _images_to_observation
-        return _images_to_observation(images, self.args.bit_depth)
+        self._norm_step = 0
 
     def append_buffer(self, new_traj):
         for observation, action, reward, done in new_traj:
@@ -130,7 +143,7 @@ class Dreamer:
             bottle(self.observation_model, (beliefs, posterior_states)),
             observations,
             reduction='none',
-        ).sum(dim=2 if self.args.symbolic else (2, 3, 4)).mean(dim=(0, 1))
+        ).sum(dim=(2, 3, 4)).mean(dim=(0, 1))
 
         reward_target = symlog(rewards) if self.args.symlog_rewards else rewards
         reward_loss = F.mse_loss(
@@ -198,13 +211,18 @@ class Dreamer:
 
         returns = cal_returns(imag_rewards[:-1], imag_values[:-1], imag_values[-1], pcont[:-1], lambda_=self.args.disclam)
 
-        # Return normalisation (Dreamer v3): scale by running 5th/95th percentile range
+        # Return normalisation (Dreamer v3): recompute percentiles every 10 steps.
+        # EMA smooths the scale so stale percentiles are fine between updates.
         if self.args.return_norm:
-            with torch.no_grad():
-                p5  = torch.quantile(returns, 0.05).item()
-                p95 = torch.quantile(returns, 0.95).item()
-            self._ret_ema_low  = 0.99 * self._ret_ema_low  + 0.01 * p5
-            self._ret_ema_high = 0.99 * self._ret_ema_high + 0.01 * p95
+            self._norm_step += 1
+            if self._norm_step % 10 == 1:
+                with torch.no_grad():
+                    flat = returns.flatten().cpu()  # kthvalue unsupported on MPS
+                    n = flat.numel()
+                    p5  = torch.kthvalue(flat, max(1, int(0.05 * n))).values.item()
+                    p95 = torch.kthvalue(flat, max(1, int(0.95 * n))).values.item()
+                self._ret_ema_low  = 0.99 * self._ret_ema_low  + 0.01 * p5
+                self._ret_ema_high = 0.99 * self._ret_ema_high + 0.01 * p95
             S = max(1.0, self._ret_ema_high - self._ret_ema_low)
             returns = returns / S
 
@@ -281,10 +299,18 @@ class Dreamer:
     # Main training loop
     # ------------------------------------------------------------------
 
+    def _opt_step(self, loss, optimizer, params_for_clip):
+        loss.backward()
+        nn.utils.clip_grad_norm_(params_for_clip, self.args.grad_clip_norm, norm_type=2)
+        optimizer.step()
+
     def update_parameters(self, gradient_steps):
         loss_info = []
         for _ in tqdm(range(gradient_steps)):
             observations, actions, rewards, nonterminals = self.D.sample(self.args.batch_size, self.args.chunk_size)
+
+            if self.augmenter is not None:
+                observations = self.augmenter(observations)
 
             init_belief = torch.zeros(self.args.batch_size, self.args.belief_size, device=self.args.device)
             init_state = torch.zeros(self.args.batch_size, self.args.state_size, device=self.args.device)
@@ -301,9 +327,8 @@ class Dreamer:
             )
             observation_loss, reward_loss, kl_loss, pcont_loss = world_model_loss
             self.world_optimizer.zero_grad()
-            (observation_loss + reward_loss + kl_loss + pcont_loss).backward()
-            nn.utils.clip_grad_norm_(self.world_param, self.args.grad_clip_norm, norm_type=2)
-            self.world_optimizer.step()
+            self._opt_step(observation_loss + reward_loss + kl_loss + pcont_loss,
+                           self.world_optimizer, self.world_param)
 
             # Freeze world + value params during actor update
             for p in self.world_param:
@@ -318,20 +343,10 @@ class Dreamer:
                 beliefs, posterior_states, with_logprob=self.args.with_logprob
             )
 
-            # --- Temperature update (auto_temp) ---
-            if self.args.auto_temp:
-                temp_loss = -(self.log_temp * (imag_ac_logps[0] + self.target_entropy).detach()).mean()
-                self.temp_optimizer.zero_grad()
-                temp_loss.backward()
-                self.temp_optimizer.step()
-                self.args.temp = self.log_temp.exp()
-
             # --- Actor update ---
             actor_loss = self._compute_loss_actor(imag_beliefs, imag_states, imag_ac_logps=imag_ac_logps)
             self.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            nn.utils.clip_grad_norm_(self.actor_model.parameters(), self.args.grad_clip_norm, norm_type=2)
-            self.actor_optimizer.step()
+            self._opt_step(actor_loss, self.actor_optimizer, self.actor_model.parameters())
 
             # Unfreeze
             for p in self.world_param:
@@ -346,10 +361,8 @@ class Dreamer:
             imag_states = imag_states.detach()
             critic_loss = self._compute_loss_critic(imag_beliefs, imag_states, imag_ac_logps=imag_ac_logps)
             self.value_optimizer.zero_grad()
-            critic_loss.backward()
-            nn.utils.clip_grad_norm_(self.value_model.parameters(), self.args.grad_clip_norm, norm_type=2)
-            nn.utils.clip_grad_norm_(self.value_model2.parameters(), self.args.grad_clip_norm, norm_type=2)
-            self.value_optimizer.step()
+            self._opt_step(critic_loss, self.value_optimizer,
+                           list(self.value_model.parameters()) + list(self.value_model2.parameters()))
 
             loss_info.append([
                 observation_loss.item(), reward_loss.item(), kl_loss.item(),
@@ -400,6 +413,97 @@ class Dreamer:
     # ------------------------------------------------------------------
     # Distributed rollout helpers
     # ------------------------------------------------------------------
+
+    def pin_reconstruction_sequences(self, obs, actions, nonterminals) -> None:
+        """Fix sequences sampled at the start of training for consistent decoder tracking."""
+        self._pinned = (obs, actions, nonterminals)
+
+    def save_reconstruction(self, images_dir: str, episode: int, total_episodes: int) -> None:
+        """Reconstruct pinned sequences and save real/pred grid.
+
+        Grid layout: real (top row) | reconstructed (bottom row).
+        Saves ep_NNN.png and latest.png. All episode images are kept so
+        the full decoder improvement progression is visible.
+        """
+        if not hasattr(self, '_pinned'):
+            return
+        obs, actions, nonterminals = self._pinned
+        n_show = obs.shape[1]
+
+        self.set_eval_mode()
+        with torch.no_grad():
+            init_b = torch.zeros(n_show, self.args.belief_size, device=self.args.device)
+            init_s = torch.zeros(n_show, self.args.state_size,  device=self.args.device)
+            beliefs, _, _, _, post_states, _, _ = self.transition_model(
+                init_s, actions[:-1], init_b,
+                bottle(self.encoder, (obs[1:],)),
+                nonterminals[:-1],
+            )
+            recon = bottle(self.observation_model, (beliefs, post_states))
+            mid  = self.args.chunk_size // 2
+            real = (obs[mid, :n_show] + 0.5).clamp(0, 1)
+            pred = (recon[mid - 1, :n_show] + 0.5).clamp(0, 1)
+            grid = make_grid(torch.cat([real, pred], dim=0), nrow=n_show)
+        self.set_train_mode()
+
+        ep_str = str(episode).zfill(len(str(total_episodes)))
+        save_image(grid, os.path.join(images_dir, f'ep_{ep_str}.png'))
+        save_image(grid, os.path.join(images_dir, 'latest.png'))
+
+    def set_train_mode(self):
+        for m in (self.transition_model, self.observation_model, self.reward_model,
+                  self.encoder, self.actor_model, self.value_model):
+            m.train()
+
+    def set_eval_mode(self):
+        for m in (self.transition_model, self.observation_model, self.reward_model,
+                  self.encoder, self.actor_model, self.value_model):
+            m.eval()
+
+    def append_episode(self, obs, actions, rewards, dones) -> None:
+        """Append a full episode (numpy arrays) to the replay buffer."""
+        for t in range(len(rewards)):
+            self.D.append(
+                torch.as_tensor(obs[t]),
+                actions[t],
+                float(rewards[t]),
+                bool(dones[t]),
+            )
+
+    def save_inference_checkpoint(self, path: str) -> None:
+        """Save encoder + transition + actor to a lightweight checkpoint for TFLite export."""
+        torch.save({
+            'encoder':          self.encoder.cpu().state_dict(),
+            'transition_model': self.transition_model.cpu().state_dict(),
+            'actor_model':      self.actor_model.cpu().state_dict(),
+        }, path)
+        self.encoder.to(self.args.device)
+        self.transition_model.to(self.args.device)
+        self.actor_model.to(self.args.device)
+
+    def save_checkpoint(self, path: str) -> None:
+        torch.save({
+            'transition_model':  self.transition_model.state_dict(),
+            'observation_model': self.observation_model.state_dict(),
+            'reward_model':      self.reward_model.state_dict(),
+            'encoder':           self.encoder.state_dict(),
+            'actor_model':       self.actor_model.state_dict(),
+            'value_model':       self.value_model.state_dict(),
+            'value_model2':      self.value_model2.state_dict(),
+            'world_optimizer':   self.world_optimizer.state_dict(),
+            'actor_optimizer':   self.actor_optimizer.state_dict(),
+            'value_optimizer':   self.value_optimizer.state_dict(),
+        }, path)
+
+    def load_checkpoint(self, path: str) -> None:
+        ckpt = torch.load(path, map_location=self.args.device)
+        self.transition_model.load_state_dict(ckpt['transition_model'])
+        self.observation_model.load_state_dict(ckpt['observation_model'])
+        self.reward_model.load_state_dict(ckpt['reward_model'])
+        self.encoder.load_state_dict(ckpt['encoder'])
+        self.actor_model.load_state_dict(ckpt['actor_model'])
+        self.value_model.load_state_dict(ckpt['value_model'])
+        self.value_model2.load_state_dict(ckpt['value_model2'])
 
     def import_parameters(self, params):
         self.encoder.load_state_dict(params['encoder'])

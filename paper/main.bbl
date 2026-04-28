@@ -1,0 +1,59 @@
+\begin{thebibliography}{10}
+
+\bibitem{bjorck2021high}
+J.~Bjorck, C.~P. Gomes, and K.~Q. Weinberger.
+\newblock High-dimensional continuous control using generalized advantage
+  estimation with layer normalization.
+\newblock {\em arXiv preprint arXiv:2106.11799}, 2021.
+
+\bibitem{ha2018worldmodels}
+D.~Ha and J.~Schmidhuber.
+\newblock World models.
+\newblock {\em arXiv preprint arXiv:1803.10122}, 2018.
+
+\bibitem{haarnoja2018sac}
+T.~Haarnoja, A.~Zhou, P.~Abbeel, and S.~Levine.
+\newblock Soft actor-critic: Off-policy maximum entropy deep reinforcement
+  learning with a stochastic actor.
+\newblock In {\em International Conference on Machine Learning (ICML)}, 2018.
+
+\bibitem{hafner2019dream}
+D.~Hafner, T.~Lillicrap, J.~Ba, and M.~Norouzi.
+\newblock Dream to control: Learning behaviors by latent imagination.
+\newblock {\em arXiv preprint arXiv:1912.01603}, 2019.
+
+\bibitem{hafner2020dreamerv2}
+D.~Hafner, T.~Lillicrap, M.~Norouzi, and J.~Ba.
+\newblock Mastering atari with discrete world models.
+\newblock {\em arXiv preprint arXiv:2010.02193}, 2020.
+
+\bibitem{hafner2023dreamerv3}
+D.~Hafner, J.~Pasukonis, J.~Ba, and T.~Lillicrap.
+\newblock Mastering diverse domains through world models.
+\newblock {\em arXiv preprint arXiv:2301.04104}, 2023.
+
+\bibitem{higgins2017betavae}
+I.~Higgins, L.~Matthey, A.~Pal, C.~Burgess, X.~Glorot, M.~Botvinick,
+  S.~Mohamed, and A.~Lerchner.
+\newblock beta-{VAE}: Learning basic visual concepts with a constrained
+  variational framework.
+\newblock {\em International Conference on Learning Representations (ICLR)},
+  2017.
+
+\bibitem{kingma2014vae}
+D.~P. Kingma and M.~Welling.
+\newblock Auto-encoding variational bayes.
+\newblock {\em arXiv preprint arXiv:1312.6114}, 2013.
+
+\bibitem{donkeycar}
+T.~Kramer et~al.
+\newblock {DonkeyCar}: An open source platform to build, train and race
+  autonomous rc cars, 2019.
+
+\bibitem{laskin2020curl}
+M.~Laskin, A.~Srinivas, and P.~Abbeel.
+\newblock {CURL}: Contrastive unsupervised representations for reinforcement
+  learning.
+\newblock In {\em International Conference on Machine Learning (ICML)}, 2020.
+
+\end{thebibliography}
